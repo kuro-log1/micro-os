@@ -20,11 +20,18 @@
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-다음 — 완전한 Unix 프로세스 모델
-  Phase 11  파일 디스크립터 & VFS
-  Phase 12  fork / exec / wait
-  Phase 14  파이프
-  Phase 15  시그널
+완료 (추가)
+  Phase 12  fork / exec / wait            ✅
+  셸 유저 프로그램 실행 (shell_spawn)      ✅
+
+다음 — SMP (멀티코어)
+  SMP Step 1  LAPIC 활성화
+  SMP Step 2  ACPI MADT 파싱 → AP 목록
+  SMP Step 3  AP 트램폴린 (16비트 → 64비트)
+  SMP Step 4  SIPI 전송 → AP 부팅
+  SMP Step 5  스핀락
+  SMP Step 6  Per-CPU 데이터
+  SMP Step 7  SMP 스케줄러
 ```
 
 ---
@@ -579,3 +586,176 @@ pipe()
 - [ ] `SIGKILL` (9): 강제 종료 (핸들러 무시, 항상 종료)
 - [ ] `SIGSEGV` (11): Page Fault 핸들러에서 발생
 - [ ] `SIGCHLD` (17): 자식 종료 시 부모에게 전달
+
+---
+
+## SMP — 멀티코어 (Symmetric Multi-Processing)
+
+여러 CPU 코어가 동등하게 OS를 공유하며 프로세스를 진짜 병렬로 실행하는 구조.
+
+```
+지금 (단일 코어)               SMP 적용 후
+코어 0 ── 모든 일             코어 0 ── shell
+코어 1 ── 멈춤                코어 1 ── hello     ← 동시
+코어 2 ── 멈춤                코어 2 ── count     ← 동시
+코어 3 ── 멈춤                코어 3 ── 다른 프로그램
+```
+
+### 핵심 개념
+
+- **BSP (Bootstrap Processor)**: 부팅을 담당하는 코어 0. 지금까지 우리가 쓴 코어.
+- **AP (Application Processor)**: 나머지 코어들. 부팅 시 real mode로 멈춰 있음.
+- **LAPIC (Local APIC)**: 코어마다 있는 인터럽트 컨트롤러. 타이머/IPI 담당.
+- **SIPI**: BSP가 AP를 깨우는 인터럽트. 트램폴린 주소를 전달.
+- **스핀락**: 두 코어가 동시에 같은 자료구조 접근 시 충돌 방지.
+
+---
+
+### SMP Step 1 — LAPIC 활성화
+
+BSP의 Local APIC를 활성화하고 LAPIC ID를 읽는다.
+LAPIC은 이후 AP 깨우기(SIPI), per-core 타이머에 모두 사용된다.
+
+```
+MSR IA32_APIC_BASE (0x1B)
+  → LAPIC 베이스 물리 주소 (기본 0xFEE00000)
+  → MMIO로 레지스터 접근
+
+LAPIC 레지스터 (오프셋)
+  0x020  LAPIC ID
+  0x030  LAPIC Version
+  0x0F0  Spurious Interrupt Vector (bit 8 = Enable)
+  0x300  ICR Low  (SIPI 전송용)
+  0x310  ICR High (대상 LAPIC ID)
+  0x320  LVT Timer
+  0x380  Initial Count
+  0x390  Current Count
+  0x3E0  Divide Configuration
+```
+
+- [ ] `kernel/lapic.h+c` 작성
+- [ ] MSR로 LAPIC 베이스 주소 읽기 (`rdmsr 0x1B`)
+- [ ] LAPIC 가상 주소 매핑 (`vmm_map_page` — 0xFEE00000)
+- [ ] Spurious Vector 레지스터 bit 8 세팅 → LAPIC 활성화
+- [ ] BSP LAPIC ID 읽어서 출력
+- [ ] QEMU `-smp 2` 추가 후 부팅 확인 ✓
+
+### SMP Step 2 — ACPI MADT 파싱
+
+ACPI MADT(Multiple APIC Description Table)에서 AP들의 LAPIC ID 목록을 읽는다.
+
+```
+RSDP → RSDT/XSDT → MADT
+MADT 엔트리 타입:
+  Type 0: Processor Local APIC  ← AP LAPIC ID 여기에
+  Type 1: I/O APIC
+  Type 2: Interrupt Source Override
+```
+
+- [ ] `kernel/acpi.h+c` 작성
+- [ ] BIOS 메모리(0xE0000~0xFFFFF)에서 RSDP 시그니처(`"RSD PTR "`) 탐색
+- [ ] RSDT → MADT 테이블 찾기
+- [ ] MADT Type 0 엔트리 순회 → AP LAPIC ID 배열에 저장
+- [ ] 발견된 CPU 수 출력 확인 ✓
+
+### SMP Step 3 — AP 트램폴린
+
+AP는 SIPI를 받으면 16비트 real mode로 지정된 주소에서 시작한다.
+저주소(0x8000)에 real mode → protected mode → long mode 전환 코드를 배치한다.
+
+```
+0x8000  [16비트 real mode 코드]
+          → A20 라인 활성화
+          → GDT 로드 (32비트용)
+          → protected mode 진입
+          → 64비트 페이지 테이블 활성화
+          → long mode 진입
+          → ap_main() 호출
+```
+
+- [ ] `boot/ap_trampoline.s` 작성 (16비트 섹션)
+- [ ] 트램폴린을 0x8000에 복사하는 코드 작성
+- [ ] `ap_main()` — AP 초기화 후 idle 루프
+- [ ] 트램폴린에서 BSP의 PML4 주소를 공유 변수로 전달
+
+### SMP Step 4 — SIPI 전송 → AP 부팅
+
+BSP가 각 AP에 INIT + SIPI를 보내 트램폴린 실행을 시작시킨다.
+
+```
+1. INIT IPI  → AP 리셋
+2. 10ms 대기
+3. SIPI      → 트램폴린 주소(0x8000 → vector=0x08) 전달
+4. 200μs 대기
+5. SIPI 재전송 (스펙상 두 번)
+```
+
+- [ ] `lapic_send_ipi(apic_id, vector)` 구현
+- [ ] 각 AP에 INIT+SIPI 전송
+- [ ] AP가 `ap_main()`에 도달하면 공유 변수로 신호
+- [ ] QEMU 로그에서 AP 부팅 메시지 확인 ✓
+
+### SMP Step 5 — 스핀락
+
+두 코어가 동시에 `kmalloc`, 스케줄러, PMM에 접근하면 데이터가 깨진다.
+x86 `lock xchg` 명령으로 원자적 락을 구현한다.
+
+```c
+typedef struct { volatile int locked; } spinlock_t;
+
+void spin_lock(spinlock_t *lk) {
+    while (__sync_lock_test_and_set(&lk->locked, 1))
+        __asm__ volatile("pause");
+}
+void spin_unlock(spinlock_t *lk) {
+    __sync_lock_release(&lk->locked);
+}
+```
+
+- [ ] `kernel/spinlock.h` 작성
+- [ ] PMM에 스핀락 추가
+- [ ] 힙(kmalloc)에 스핀락 추가
+- [ ] 스케줄러 런큐에 스핀락 추가
+
+### SMP Step 6 — Per-CPU 데이터
+
+각 코어가 독립된 `current` 프로세스 포인터와 커널 스택을 가져야 한다.
+GS 세그먼트 베이스를 per-CPU 구조체 포인터로 사용한다.
+
+```c
+typedef struct {
+    int        cpu_id;
+    process_t *current;
+    uint64_t   kernel_stack[1024];
+    // TSS는 코어마다 별도
+} cpu_t;
+
+// GS:0 → cpu_t* 로 접근
+static inline cpu_t *this_cpu(void) {
+    cpu_t *c;
+    __asm__("mov %%gs:0, %0" : "=r"(c));
+    return c;
+}
+```
+
+- [ ] `kernel/cpu.h` — `cpu_t` 구조체 정의
+- [ ] BSP/AP 각각 `cpu_t` 초기화
+- [ ] `wrmsrl(MSR_GS_BASE, &cpu[id])` 로 GS 설정
+- [ ] `current_process()` → `this_cpu()->current` 로 교체
+- [ ] 각 코어마다 별도 TSS 등록
+
+### SMP Step 7 — SMP 스케줄러
+
+공유 런큐에서 각 코어가 독립적으로 다음 프로세스를 가져와 실행한다.
+
+```
+런큐 (스핀락 보호)
+  [shell] [hello] [count] [idle0] [idle1]
+     ↑                               ↑
+   코어 0이 가져감               코어 1이 가져감
+```
+
+- [ ] 공유 런큐 + 스핀락으로 `scheduler_next()` 구현
+- [ ] 각 코어 idle 프로세스 (코어 수만큼)
+- [ ] LAPIC 타이머로 per-core 선점 스케줄링
+- [ ] 프로세스가 여러 코어에서 실제로 동시 실행 확인 ✓
