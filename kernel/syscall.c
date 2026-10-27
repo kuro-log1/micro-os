@@ -12,6 +12,8 @@
 #include "proc/process.h"
 #include "fs/ext2.h"
 #include "mm/vmm.h"
+#include "mm/pmm.h"
+#include "mm/heap.h"
 #include <stdint.h>
 
 extern void isr128(void);
@@ -161,11 +163,50 @@ static int64_t sys_lseek(int fd, int64_t offset, int whence) {
 
 static void sys_exit(int code) {
     process_t *p = current_process();
-    kprintf("[exit] pid=%d exit(%d)\n", p->pid, code);
+    kprintf("[exit] pid=%d exit(code=%d): closing fds\n", p->pid, code);
+
+    /* 열린 fd 전부 닫기 */
+    for (int i = 0; i < FD_MAX; i++) {
+        if (p->fd_table[i]) {
+            file_free(p->fd_table[i]);
+            p->fd_table[i] = 0;
+        }
+    }
+
     p->exit_code = code;
     p->state     = PROC_DEAD;
+    kprintf("[exit] pid=%d marked PROC_DEAD, yielding\n", p->pid);
     schedule();
     __asm__ volatile("cli; hlt");
+}
+
+static int sys_wait(int pid) {
+    process_t *child = scheduler_find(pid);
+    if (!child) {
+        kprintf("[wait] pid=%d not found\n", pid);
+        return -1;
+    }
+    kprintf("[wait] pid=%d waiting for child pid=%d\n",
+            current_process()->pid, pid);
+
+    /* 자식이 종료될 때까지 yield */
+    while (child->state != PROC_DEAD)
+        schedule();
+
+    int code = child->exit_code;
+    kprintf("[wait] child pid=%d exited(code=%d), cleaning up\n", pid, code);
+
+    /* 좀비 정리: 리스트에서 제거 후 메모리 해제 */
+    scheduler_remove(child);
+    vmm_free_user(child->pml4);
+    if (child->pml4 != vmm_get_pml4())
+        pmm_free_page(child->pml4);
+    if (child->stack)
+        kfree(child->stack);
+    kfree(child);
+    kprintf("[wait] zombie pid=%d reaped\n", pid);
+
+    return code;
 }
 
 static void sys_exec(const char *user_path) {
@@ -220,6 +261,7 @@ void syscall_handler(registers_t *r) {
     case SYS_LSEEK:  r->rax = (uint64_t)sys_lseek((int)r->rdi, (int64_t)r->rsi, (int)r->rdx); break;
     case SYS_FORK:   r->rax = (uint64_t)sys_fork (r); break;
     case SYS_EXEC:   sys_exec((const char *)r->rdi); break;
+    case SYS_WAIT:   r->rax = (uint64_t)sys_wait ((int)r->rdi); break;
     case SYS_EXIT:   sys_exit((int)r->rdi); break;
     default:
         kprintf("[syscall] unknown: rax=%lu\n", r->rax);

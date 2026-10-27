@@ -3,7 +3,8 @@
 #include "kernel/file.h"
 #include "kernel/idt.h"
 
-#define FD_MAX 16
+#define FD_MAX     16
+#define STACK_SIZE 8192
 
 typedef enum { PROC_READY, PROC_RUNNING, PROC_DEAD } proc_state_t;
 

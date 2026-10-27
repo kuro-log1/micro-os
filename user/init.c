@@ -14,6 +14,13 @@ static void sys_exec(const char *path) {
         : : "a"(59L), "D"(path) : "memory");
 }
 
+static int sys_wait(int pid) {
+    long ret;
+    __asm__ volatile("int $0x80"
+        : "=a"(ret) : "a"(61L), "D"((long)pid) : "memory");
+    return (int)ret;
+}
+
 static ssize_t sys_write(int fd, const char *buf, long len) {
     long ret;
     __asm__ volatile("int $0x80"
@@ -36,17 +43,29 @@ static void print(const char *s) {
 }
 
 void _start(void) {
+    print("[init] fork+exec+wait test\n");
+
     int pid = sys_fork();
 
     if (pid == 0) {
-        /* 자식: /hello를 exec */
+        /* 자식: /hello exec */
         print("[child] execing /hello\n");
         sys_exec("/hello");
-        print("[child] exec failed!\n");
+        print("[child] exec failed\n");
         sys_exit(1);
     }
 
-    /* 부모: 자식 fork 확인 후 종료 (wait은 Step 3에서) */
-    print("[parent] forked child, exiting\n");
+    /* 부모: 자식 종료까지 대기 */
+    print("[parent] waiting for child pid=");
+    /* 간단한 정수 출력 */
+    char buf[4];
+    buf[0] = '0' + (pid % 10);
+    buf[1] = '\n';
+    sys_write(1, buf, 2);
+
+    int code = sys_wait(pid);
+    (void)code;
+
+    print("[parent] child exited, done!\n");
     sys_exit(0);
 }

@@ -8,7 +8,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define STACK_SIZE 8192      /* 프로세스당 8KB 커널 스택 */
+/* STACK_SIZE는 process.h에 정의 */
 /* ring3 syscall 프레임: registers_t(20 words) + user_rsp + user_ss = 22 uint64_t */
 #define RING3_FRAME_WORDS 22
 

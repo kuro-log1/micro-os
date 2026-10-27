@@ -9,6 +9,7 @@
 #define SYS_FORK   57
 #define SYS_EXEC   59
 #define SYS_EXIT   60
+#define SYS_WAIT   61
 
 void syscall_init(void);
 void syscall_handler(registers_t *r);
