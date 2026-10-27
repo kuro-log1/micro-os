@@ -1,6 +1,8 @@
 #include "kernel/syscall.h"
 #include "kernel/file.h"
 #include "kernel/idt.h"
+#include "kernel/elf.h"
+#include "kernel/usermode.h"
 #include "drivers/vga.h"
 #include "drivers/serial.h"
 #include "drivers/keyboard.h"
@@ -9,6 +11,7 @@
 #include "proc/scheduler.h"
 #include "proc/process.h"
 #include "fs/ext2.h"
+#include "mm/vmm.h"
 #include <stdint.h>
 
 extern void isr128(void);
@@ -165,6 +168,41 @@ static void sys_exit(int code) {
     __asm__ volatile("cli; hlt");
 }
 
+static void sys_exec(const char *user_path) {
+    /* path를 커널 스택으로 복사 — vmm_free_user 후엔 유저 메모리가 사라짐 */
+    char name[256];
+    int  i = 0;
+    const char *p = user_path;
+    if (*p == '/') p++;
+    while (i < 255 && *p) name[i++] = *p++;
+    name[i] = '\0';
+
+    process_t *proc = current_process();
+    kprintf("[exec] pid=%d exec(/%s): freeing user space\n", proc->pid, name);
+
+    /* 현재 유저 주소 공간 해제 (TLB 플러시 포함) */
+    vmm_free_user(proc->pml4);
+    kprintf("[exec] pid=%d user space freed, loading ELF\n", proc->pid);
+
+    /* ELF 로드 → 새 유저 페이지 매핑 */
+    uint64_t entry, rsp;
+    if (elf_load(name, &entry, &rsp) < 0) {
+        kprintf("[exec] pid=%d /%s not found — marking dead\n", proc->pid, name);
+        proc->state = PROC_DEAD;
+        schedule();
+        __builtin_unreachable();
+    }
+
+    proc->user_rip = entry;
+    proc->user_rsp = rsp;
+    kprintf("[exec] pid=%d ELF loaded: entry=%p rsp=%p\n",
+            proc->pid, (void *)entry, (void *)rsp);
+
+    __asm__ volatile("sti");
+    jump_to_usermode(entry, rsp);
+    __builtin_unreachable();
+}
+
 static int sys_fork(registers_t *r) {
     process_t *child = process_fork(r);
     if (!child) return -1;
@@ -181,6 +219,7 @@ void syscall_handler(registers_t *r) {
     case SYS_CLOSE:  r->rax = (uint64_t)sys_close((int)r->rdi); break;
     case SYS_LSEEK:  r->rax = (uint64_t)sys_lseek((int)r->rdi, (int64_t)r->rsi, (int)r->rdx); break;
     case SYS_FORK:   r->rax = (uint64_t)sys_fork (r); break;
+    case SYS_EXEC:   sys_exec((const char *)r->rdi); break;
     case SYS_EXIT:   sys_exit((int)r->rdi); break;
     default:
         kprintf("[syscall] unknown: rax=%lu\n", r->rax);

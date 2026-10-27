@@ -10,3 +10,4 @@ void      vmm_map_page(uint64_t *pml4, uint64_t virt, uint64_t phys, uint64_t fl
 void      vmm_unmap_page(uint64_t *pml4, uint64_t virt);
 uint64_t *vmm_get_pml4(void);
 uint64_t *vmm_fork(uint64_t *parent_pml4);
+void      vmm_free_user(uint64_t *pml4);

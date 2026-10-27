@@ -53,14 +53,17 @@ $(ISO_DIR)/boot/grub/grub.cfg: grub.cfg
 $(ISO): $(KERNEL) $(ISO_DIR)/boot/grub/grub.cfg
 	$(MKRSC) -o $@ $(ISO_DIR)
 
-user: $(DISKFILES)/init
+user: $(DISKFILES)/init $(DISKFILES)/hello
 
 $(DISKFILES)/init: user/init.c user/linker.ld
 	$(USERCC) $(USERFLAGS) -T user/linker.ld user/init.c -o $@
 
+$(DISKFILES)/hello: user/hello.c user/linker.ld
+	$(USERCC) $(USERFLAGS) -T user/linker.ld user/hello.c -o $@
+
 disk: user $(DISK)
 
-$(DISK): $(DISKFILES)/init
+$(DISK): $(DISKFILES)/init $(DISKFILES)/hello
 	$(GENEXT2FS) -b 16384 -B 1024 -N 1024 -d $(DISKFILES) -L "micro-os" $(DISK)
 
 clean:

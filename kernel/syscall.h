@@ -7,6 +7,7 @@
 #define SYS_CLOSE  3
 #define SYS_LSEEK  8
 #define SYS_FORK   57
+#define SYS_EXEC   59
 #define SYS_EXIT   60
 
 void syscall_init(void);

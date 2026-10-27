@@ -138,6 +138,38 @@ uint64_t *vmm_fork(uint64_t *parent_pml4) {
     return child_pml4;
 }
 
+/* 유저 공간(U/S 비트 있는 4KB 페이지)의 물리 페이지를 해제하고 PT 엔트리를 초기화한다.
+ * PT/PD/PDPT 페이지 자체는 해제하지 않는다(exec 시 재사용, zombie 청소는 호출자 책임). */
+void vmm_free_user(uint64_t *pml4) {
+    for (int i = 0; i < 512; i++) {
+        if (!(pml4[i] & VMM_PRESENT)) continue;
+        uint64_t *pdpt = (uint64_t *)ENTRY_ADDR(pml4[i]);
+
+        for (int j = 0; j < 512; j++) {
+            if (!(pdpt[j] & VMM_PRESENT)) continue;
+            uint64_t *pd = (uint64_t *)ENTRY_ADDR(pdpt[j]);
+
+            for (int k = 0; k < 512; k++) {
+                if (!(pd[k] & VMM_PRESENT)) continue;
+                if (pd[k] & (1UL << 7)) continue; /* 2MB 커널 페이지 — 스킵 */
+
+                uint64_t *pt = (uint64_t *)ENTRY_ADDR(pd[k]);
+
+                for (int l = 0; l < 512; l++) {
+                    if (!(pt[l] & VMM_PRESENT)) continue;
+                    if (!(pt[l] & VMM_USER))    continue;
+
+                    pmm_free_page((void *)ENTRY_ADDR(pt[l]));
+                    pt[l] = 0;
+                }
+            }
+        }
+    }
+
+    /* CR3 재기록으로 전체 TLB 플러시 */
+    __asm__ volatile("mov %%cr3, %%rax\n mov %%rax, %%cr3\n" ::: "rax", "memory");
+}
+
 void vmm_unmap_page(uint64_t *pml4, uint64_t virt) {
     uint64_t pml4i = PML4_IDX(virt);
     uint64_t pdpti = PDPT_IDX(virt);
