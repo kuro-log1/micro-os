@@ -85,6 +85,7 @@ Part 4. 유닉스 프로세스 — "fork · exec · wait 로 프로그램을 띄
 | 20 | [step20-fork](step20-fork.md) | 주소 공간을 복제해 자식 프로세스 만들기 |
 | 21 | [step21-exec](step21-exec.md) | 내 주소 공간을 새 프로그램으로 갈아 끼우기 |
 | 22 | [step22-wait-exit](step22-wait-exit.md) | 종료 코드 전달, 좀비 회수, 프로세스별 CR3 |
+| 23 | [step23-shell-spawn](step23-shell-spawn.md) | 셸에서 디스크의 프로그램 실행 |
 
 ## 미리 알아 두면 좋은 것
 

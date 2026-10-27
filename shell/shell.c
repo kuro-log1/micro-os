@@ -3,6 +3,11 @@
 #include "drivers/vga.h"
 #include "fs/fs.h"
 #include "fs/ext2.h"
+#include "kernel/elf.h"
+#include "mm/vmm.h"
+#include "mm/heap.h"
+#include "proc/process.h"
+#include "proc/scheduler.h"
 #include "lib/printf.h"
 #include "lib/string.h"
 
@@ -40,6 +45,28 @@ static int split(char *line, char **argv) {
         if (*p) *p++ = '\0';
     }
     return argc;
+}
+
+/* 유저 ELF를 로드해 실행하고 종료까지 기다린 뒤 정리한다 */
+static void shell_spawn(const char *name) {
+    uint64_t entry, rsp;
+    if (elf_load(name, &entry, &rsp) < 0) {
+        printf("%s: not found\n", name);
+        return;
+    }
+
+    process_t *child = process_create_user(entry, rsp);
+    scheduler_add(child);
+
+    /* 자식이 종료될 때까지 yield */
+    while (child->state != PROC_DEAD)
+        schedule();
+
+    /* zombie 정리 */
+    scheduler_remove(child);
+    vmm_free_user(child->pml4);
+    if (child->stack) kfree(child->stack);
+    kfree(child);
 }
 
 void shell_run(void) {
@@ -117,7 +144,8 @@ void shell_run(void) {
                     printf("write failed\n");
             }
         } else {
-            printf("unknown: %s\n", argv[0]);
+            /* 빌트인이 아니면 ext2에서 찾아 실행 */
+            shell_spawn(argv[0]);
         }
     }
 }
