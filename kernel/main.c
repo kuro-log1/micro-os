@@ -6,6 +6,7 @@
 #include "kernel/idt.h"
 #include "kernel/pic.h"
 #include "kernel/timer.h"
+#include "kernel/tss.h"
 #include "mm/pmm.h"
 #include "mm/vmm.h"
 #include "mm/heap.h"
@@ -28,6 +29,7 @@ void kernel_main(uint64_t magic, uint64_t info) {
     idt_init();
     pic_init();
     irq_init();
+    tss_init();
     timer_init(100);
     keyboard_init();
     mouse_init();

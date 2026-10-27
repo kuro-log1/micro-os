@@ -29,10 +29,15 @@ mb2_end:
 /* ---------- 64-bit GDT ---------- */
 .section .data
 .align 16
+.global gdt64
 gdt64:
     .quad 0x0000000000000000    /* 0x00: null */
     .quad 0x00AF9A000000FFFF    /* 0x08: 커널 코드 (L=1, P=1, DPL=0) */
     .quad 0x00CF92000000FFFF    /* 0x10: 커널 데이터 (P=1, DPL=0, RW=1) */
+    .quad 0x00AFFA000000FFFF    /* 0x18: 유저 코드  (L=1, P=1, DPL=3) */
+    .quad 0x00CFF2000000FFFF    /* 0x20: 유저 데이터 (P=1, DPL=3, RW=1) */
+    .quad 0x0000000000000000    /* 0x28: TSS 디스크립터 low  (tss_init이 채움) */
+    .quad 0x0000000000000000    /* 0x30: TSS 디스크립터 high (tss_init이 채움) */
 gdt64_end:
 
 gdt64_ptr:

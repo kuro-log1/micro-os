@@ -169,9 +169,32 @@ for (;;) __asm__ volatile("sti; hlt");
 
 ## Phase 8 — 시스템 콜 (선택)
 
-- [ ] `syscall` 인터럽트 (int 0x80 또는 SYSCALL 명령어) 등록
-- [ ] 기본 시스템 콜 구현 (write, exit)
-- [ ] 유저 모드 (Ring 3) 전환
+### Step 1 — GDT 확장 + TSS 설정 ✅
+- [x] `boot/boot.s` GDT에 유저 코드(0x18, DPL=3), 유저 데이터(0x20, DPL=3), TSS 슬롯(0x28/0x30) 추가
+- [x] `kernel/tss.c` 작성 (TSS 구조체, rsp0 설정, GDT 디스크립터 패치, `ltr` 로드)
+- [x] `kernel/main.c`에서 `tss_init()` 호출
+- [x] 빌드 + QEMU: 셸 정상 동작 확인 ✓
+
+### Step 2 — int 0x80 게이트 등록
+- [ ] `kernel/idt_asm.s`에 `isr128` 스텁 + `syscall_common` 추가
+- [ ] `kernel/idt.c`에 `idt_set_user_gate()` (DPL=3 게이트) 추가
+- [ ] `kernel/syscall.c` 작성 (syscall_init: int 0x80 등록, 기본 핸들러)
+- [ ] `kernel/main.c`에서 `syscall_init()` 호출
+- [ ] 빌드 + QEMU: 커널에서 int 0x80 테스트 호출 확인 ✓
+
+### Step 3 — 유저 메모리 매핑
+- [ ] `mm/vmm.c` 중간 페이지 테이블에 U/S 비트 전파 수정
+- [ ] `kernel/usermode.c` 작성 (`usermode_setup`: 코드/스택 페이지 할당·매핑, 유저 프로그램 복사)
+- [ ] `kernel/main.c`에서 `usermode_setup()` 호출 후 매핑 성공 로그 확인
+- [ ] 빌드 + QEMU: Page Fault 없이 매핑 완료 로그 확인 ✓
+
+### Step 4 — Ring 3 진입 + 유저 프로그램 실행
+- [ ] `kernel/usermode.c`에 `jump_to_usermode()` (iretq 방식) 추가
+- [ ] `proc/process.c`에 `process_create_user()` 추가 (유저 트램폴린 → iretq)
+- [ ] `proc/process.h`에 `PROC_DEAD` 추가, `proc/scheduler.c` 스킵 로직 추가
+- [ ] `kernel/syscall.c`에 `sys_write`, `sys_exit` 구현
+- [ ] `kernel/main.c`에서 유저 프로세스 등록
+- [ ] 빌드 + QEMU: "Hello from ring 3!" 출력 + 셸 복귀 확인 ✓
 
 ## Phase 9 — 셸 ✅
 
