@@ -67,6 +67,7 @@ Part 4. 유닉스 프로세스 — "fork · exec · wait 로 프로그램을 띄
 | 02 | [step02-idt](step02-idt.md) | CPU 예외가 나면 레지스터를 덤프하고 멈추는 틀 |
 | 03 | [step03-pic-timer](step03-pic-timer.md) | 하드웨어 인터럽트(IRQ)를 C 함수로 받는 틀 + 100Hz 타이머 |
 | 04 | [step04-keyboard](step04-keyboard.md) | 키보드 링 버퍼 + `keyboard_getchar()`, 마우스 커서 |
+| 05 | [step05-pmm](step05-pmm.md) | 4KB 물리 프레임을 빌려 주고 돌려받는 할당기 |
 
 ## 미리 알아 두면 좋은 것
 
