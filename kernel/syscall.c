@@ -157,10 +157,20 @@ static int64_t sys_lseek(int fd, int64_t offset, int whence) {
 }
 
 static void sys_exit(int code) {
-    kprintf("[syscall] pid %d: exit(%d)\n", current_process()->pid, code);
-    current_process()->state = PROC_DEAD;
+    process_t *p = current_process();
+    kprintf("[exit] pid=%d exit(%d)\n", p->pid, code);
+    p->exit_code = code;
+    p->state     = PROC_DEAD;
     schedule();
     __asm__ volatile("cli; hlt");
+}
+
+static int sys_fork(registers_t *r) {
+    process_t *child = process_fork(r);
+    if (!child) return -1;
+    kprintf("[fork] parent pid=%d → child pid=%d\n",
+            current_process()->pid, child->pid);
+    return child->pid;
 }
 
 void syscall_handler(registers_t *r) {
@@ -170,6 +180,7 @@ void syscall_handler(registers_t *r) {
     case SYS_OPEN:   r->rax = (uint64_t)sys_open ((const char *)r->rdi, (int)r->rsi); break;
     case SYS_CLOSE:  r->rax = (uint64_t)sys_close((int)r->rdi); break;
     case SYS_LSEEK:  r->rax = (uint64_t)sys_lseek((int)r->rdi, (int64_t)r->rsi, (int)r->rdx); break;
+    case SYS_FORK:   r->rax = (uint64_t)sys_fork (r); break;
     case SYS_EXIT:   sys_exit((int)r->rdi); break;
     default:
         kprintf("[syscall] unknown: rax=%lu\n", r->rax);

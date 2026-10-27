@@ -81,6 +81,63 @@ void vmm_map_page(uint64_t *pml4, uint64_t virt, uint64_t phys, uint64_t flags) 
     __asm__ volatile("invlpg (%0)" : : "r"(virt) : "memory");
 }
 
+/* 부모 PML4를 깊은 복사: 2MB 커널 페이지는 엔트리만 공유, 4KB 유저 페이지는 물리 내용 복사 */
+uint64_t *vmm_fork(uint64_t *parent_pml4) {
+    uint64_t *child_pml4 = pmm_alloc_page();
+    clear_page(child_pml4);
+
+    for (int i = 0; i < 512; i++) {
+        if (!(parent_pml4[i] & VMM_PRESENT)) continue;
+
+        uint64_t *parent_pdpt = (uint64_t *)ENTRY_ADDR(parent_pml4[i]);
+        uint64_t *child_pdpt  = pmm_alloc_page();
+        clear_page(child_pdpt);
+        child_pml4[i] = (uint64_t)child_pdpt | (parent_pml4[i] & 0xFFF);
+
+        for (int j = 0; j < 512; j++) {
+            if (!(parent_pdpt[j] & VMM_PRESENT)) continue;
+
+            uint64_t *parent_pd = (uint64_t *)ENTRY_ADDR(parent_pdpt[j]);
+            uint64_t *child_pd  = pmm_alloc_page();
+            clear_page(child_pd);
+            child_pdpt[j] = (uint64_t)child_pd | (parent_pdpt[j] & 0xFFF);
+
+            for (int k = 0; k < 512; k++) {
+                if (!(parent_pd[k] & VMM_PRESENT)) continue;
+
+                /* 2MB 대형 페이지 — 커널 페이지이므로 엔트리만 공유 */
+                if (parent_pd[k] & (1UL << 7)) {
+                    child_pd[k] = parent_pd[k];
+                    continue;
+                }
+
+                uint64_t *parent_pt = (uint64_t *)ENTRY_ADDR(parent_pd[k]);
+                uint64_t *child_pt  = pmm_alloc_page();
+                clear_page(child_pt);
+                child_pd[k] = (uint64_t)child_pt | (parent_pd[k] & 0xFFF);
+
+                for (int l = 0; l < 512; l++) {
+                    if (!(parent_pt[l] & VMM_PRESENT)) continue;
+
+                    if (parent_pt[l] & VMM_USER) {
+                        /* 유저 4KB 페이지 — 물리 내용 복사 */
+                        uint8_t *new_page = pmm_alloc_page();
+                        uint8_t *old_page = (uint8_t *)ENTRY_ADDR(parent_pt[l]);
+                        for (int m = 0; m < 4096; m++)
+                            new_page[m] = old_page[m];
+                        child_pt[l] = (uint64_t)new_page | (parent_pt[l] & 0xFFF);
+                    } else {
+                        /* 커널 4KB 페이지 — 엔트리만 공유 */
+                        child_pt[l] = parent_pt[l];
+                    }
+                }
+            }
+        }
+    }
+
+    return child_pml4;
+}
+
 void vmm_unmap_page(uint64_t *pml4, uint64_t virt) {
     uint64_t pml4i = PML4_IDX(virt);
     uint64_t pdpti = PDPT_IDX(virt);

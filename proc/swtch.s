@@ -31,3 +31,30 @@ swtch:
 
     /* 새 프로세스가 멈췄던 위치(또는 entry 함수)로 점프 */
     ret
+
+/* ============================================================
+ * fork_return — fork로 생성된 자식 프로세스의 첫 실행 진입점.
+ *
+ * swtch가 callee-saved 6개를 pop하고 ret으로 여기에 도달하면
+ * RSP는 복사해둔 ring3 syscall 프레임(registers_t)의 r15를 가리킨다.
+ * 레지스터를 복원하고 iretq로 ring3에 복귀한다.
+ * ============================================================ */
+.global fork_return
+fork_return:
+    popq %r15
+    popq %r14
+    popq %r13
+    popq %r12
+    popq %r11
+    popq %r10
+    popq %r9
+    popq %r8
+    popq %rbp
+    popq %rdi
+    popq %rsi
+    popq %rdx
+    popq %rcx
+    popq %rbx
+    popq %rax
+    addq $16, %rsp   /* int_no + err_code 스킵 */
+    iretq
