@@ -1,7 +1,6 @@
 #include "kernel/timer.h"
 #include "kernel/idt.h"
 #include "kernel/io.h"
-#include "lib/printf.h"
 #include <stdint.h>
 
 static volatile uint64_t ticks = 0;
@@ -9,9 +8,6 @@ static volatile uint64_t ticks = 0;
 static void timer_handler(registers_t *r) {
     (void)r;
     ticks++;
-    /* 100Hz 기준 100틱 = 1초 (Step 08에서 스케줄러 호출로 바뀜) */
-    if (ticks % 100 == 0)
-        printf("[timer] %lu s\n", ticks / 100);
 }
 
 void timer_init(uint32_t hz) {

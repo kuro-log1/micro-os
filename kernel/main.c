@@ -1,6 +1,8 @@
 #include <stdint.h>
 #include "drivers/vga.h"
 #include "drivers/serial.h"
+#include "drivers/keyboard.h"
+#include "drivers/mouse.h"
 #include "kernel/idt.h"
 #include "kernel/pic.h"
 #include "kernel/timer.h"
@@ -21,7 +23,11 @@ void kernel_main(uint64_t magic, uint64_t info) {
     pic_init();
     irq_init();
     timer_init(100);
+    keyboard_init();
+    mouse_init();
     __asm__ volatile("sti");
 
-    for (;;) __asm__ volatile("sti; hlt");
+    /* 키보드 IRQ가 링 버퍼에 넣은 글자를 꺼내 화면에 에코 */
+    for (;;)
+        printf("%c", keyboard_getchar());
 }
