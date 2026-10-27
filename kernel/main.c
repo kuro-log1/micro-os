@@ -10,6 +10,7 @@
 #include "kernel/timer.h"
 #include "kernel/tss.h"
 #include "kernel/syscall.h"
+#include "kernel/file.h"
 #include "kernel/usermode.h"
 #include "kernel/elf.h"
 #include "kernel/cpuid.h"
@@ -48,6 +49,7 @@ void kernel_main(uint64_t magic, uint64_t info) {
     pmm_init(info);
     vmm_init();
     heap_init();
+    file_table_init();
     pci_scan();
     ata_identify();
     fs_init();

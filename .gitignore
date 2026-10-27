@@ -15,3 +15,6 @@ iso/boot/grub/grub.cfg
 
 # macOS
 .DS_Store
+
+disk.img
+diskfiles/init

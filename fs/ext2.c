@@ -197,6 +197,69 @@ int ext2_read_file(uint32_t ino, void *buf, uint32_t max_len) {
     return (int)total;
 }
 
+/* offset부터 최대 n바이트 읽기 (sys_read의 fd offset 지원용) */
+int ext2_read_file_at(uint32_t ino, void *buf, uint32_t offset, uint32_t n) {
+    ext2_inode_t inode;
+    if (ext2_read_inode(ino, &inode) < 0) return -1;
+
+    if (offset >= inode.i_size) return 0;
+    uint32_t remaining = inode.i_size - offset;
+    if (n > remaining) n = remaining;
+    if (n == 0) return 0;
+
+    uint8_t *dst   = buf;
+    uint32_t total = 0;
+
+    static uint8_t blk[1024];
+
+    /* 직접 블록 [0..11] */
+    for (int i = 0; i < 12 && n > 0; i++) {
+        uint32_t blk_start = (uint32_t)i * block_size;
+        uint32_t blk_end   = blk_start + block_size;
+
+        if (offset >= blk_end) continue;
+        if (inode.i_block[i] == 0) break;
+        if (ext2_read_block(inode.i_block[i], blk) < 0) return -1;
+
+        uint32_t inner = (offset > blk_start) ? (offset - blk_start) : 0;
+        uint32_t avail = block_size - inner;
+        uint32_t chunk = (n < avail) ? n : avail;
+
+        memcpy(dst, blk + inner, chunk);
+        dst    += chunk;
+        total  += chunk;
+        n      -= chunk;
+        offset += chunk;
+    }
+
+    /* 단일 간접 블록 [12] */
+    if (n > 0 && inode.i_block[12] != 0) {
+        static uint32_t indirect[256];
+        if (ext2_read_block(inode.i_block[12], indirect) < 0) return -1;
+
+        uint32_t entries = block_size / 4;
+        for (uint32_t i = 0; i < entries && n > 0; i++) {
+            uint32_t blk_start = (12 + i) * block_size;
+            uint32_t blk_end   = blk_start + block_size;
+            if (offset >= blk_end) continue;
+            if (indirect[i] == 0) break;
+            if (ext2_read_block(indirect[i], blk) < 0) return -1;
+
+            uint32_t inner = (offset > blk_start) ? (offset - blk_start) : 0;
+            uint32_t avail = block_size - inner;
+            uint32_t chunk = (n < avail) ? n : avail;
+
+            memcpy(dst, blk + inner, chunk);
+            dst    += chunk;
+            total  += chunk;
+            n      -= chunk;
+            offset += chunk;
+        }
+    }
+
+    return (int)total;
+}
+
 /* ── 쓰기 헬퍼 ─────────────────────────────────────────────── */
 
 int ext2_write_block(uint32_t block_no, const void *buf) {

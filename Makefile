@@ -28,7 +28,7 @@ GENEXT2FS = genext2fs
 USERCC    = x86_64-elf-gcc
 USERFLAGS = -std=c11 -ffreestanding -O2 -fno-builtin -fno-stack-protector \
             -fno-pic -m64 -mno-sse -mno-sse2 -mno-mmx -mno-avx \
-            -mno-red-zone -nostdlib -Wall -Wextra
+            -mno-red-zone -nostdlib -Wall -Wextra -mcmodel=large
 
 .PHONY: all clean qemu disk user
 

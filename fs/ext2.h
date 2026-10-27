@@ -101,6 +101,7 @@ int      ext2_read_block(uint32_t block_no, void *buf);
 uint32_t ext2_dir_lookup(uint32_t dir_ino, const char *name);
 void     ext2_dir_ls(uint32_t dir_ino);
 int      ext2_read_file(uint32_t ino, void *buf, uint32_t max_len);
+int      ext2_read_file_at(uint32_t ino, void *buf, uint32_t offset, uint32_t n);
 int      ext2_write_block(uint32_t block_no, const void *buf);
 int      ext2_write_file(uint32_t parent_ino, const char *name,
                          const void *buf, uint32_t len);

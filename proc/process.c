@@ -3,12 +3,30 @@
 #include "mm/heap.h"
 #include "mm/vmm.h"
 #include "kernel/usermode.h"
+#include "kernel/file.h"
+#include "lib/string.h"
 #include <stdint.h>
 #include <stddef.h>
 
 #define STACK_SIZE 8192  /* 프로세스당 8KB 스택 */
 
 static int next_pid = 0;
+
+static void proc_init_fds(process_t *p) {
+    memset(p->fd_table, 0, sizeof(p->fd_table));
+
+    file_t *stdin_f  = file_alloc();
+    stdin_f->type    = FILE_TYPE_STDIN;
+    p->fd_table[0]   = stdin_f;
+
+    file_t *stdout_f = file_alloc();
+    stdout_f->type   = FILE_TYPE_STDOUT;
+    p->fd_table[1]   = stdout_f;
+
+    file_t *stderr_f = file_alloc();
+    stderr_f->type   = FILE_TYPE_STDOUT;
+    p->fd_table[2]   = stderr_f;
+}
 
 /*
  * 인터럽트 컨텍스트에서 새 프로세스로 처음 스위칭될 때
@@ -47,6 +65,7 @@ process_t *process_create(void (*entry)(void)) {
     p->pid      = next_pid++;
     p->entry    = entry;
     p->next     = NULL;
+    proc_init_fds(p);
     return p;
 }
 
@@ -61,6 +80,7 @@ process_t *process_create_idle(void) {
     p->pid      = next_pid++;
     p->entry    = NULL;
     p->next     = NULL;
+    proc_init_fds(p);
     return p;
 }
 
@@ -94,5 +114,6 @@ process_t *process_create_user(uint64_t user_rip, uint64_t user_rsp) {
     p->pid      = next_pid++;
     p->entry    = NULL;
     p->next     = NULL;
+    proc_init_fds(p);
     return p;
 }

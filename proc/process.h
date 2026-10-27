@@ -1,5 +1,8 @@
 #pragma once
 #include <stdint.h>
+#include "kernel/file.h"
+
+#define FD_MAX 16
 
 typedef enum { PROC_READY, PROC_RUNNING, PROC_DEAD } proc_state_t;
 
@@ -13,6 +16,7 @@ typedef struct process {
     int            pid;
     struct process *next;
     void         (*entry)(void);
+    file_t        *fd_table[FD_MAX];
 } process_t;
 
 process_t *process_create(void (*entry)(void));
