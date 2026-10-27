@@ -9,6 +9,8 @@
 #include "kernel/tss.h"
 #include "kernel/syscall.h"
 #include "kernel/usermode.h"
+#include "kernel/cpuid.h"
+#include "kernel/mmap.h"
 #include "mm/pmm.h"
 #include "mm/vmm.h"
 #include "mm/heap.h"
@@ -24,9 +26,8 @@ void kernel_main(uint64_t magic, uint64_t info) {
     vga_init();
     serial_init();
 
-    printf("============================\n");
-    printf("  micro-os booted!\n");
-    printf("============================\n");
+    klog("[boot] micro-os starting...\n");
+    cpuid_log();
 
     idt_init();
     pic_init();
@@ -37,7 +38,9 @@ void kernel_main(uint64_t magic, uint64_t info) {
     keyboard_init();
     mouse_init();
     __asm__ volatile("sti");
+    tsc_calibrate();  /* PIT 1틱(10ms)으로 TSC 주파수 보정 */
 
+    mmap_log(info);
     pmm_init(info);
     vmm_init();
     heap_init();

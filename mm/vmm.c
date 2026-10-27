@@ -25,7 +25,7 @@ uint64_t *vmm_get_pml4(void) {
 }
 
 void vmm_init(void) {
-    printf("[vmm] kernel PML4 at %p\n", (void *)vmm_get_pml4());
+    klog("[vmm] kernel PML4 at %p\n", (void *)vmm_get_pml4());
 }
 
 void vmm_map_page(uint64_t *pml4, uint64_t virt, uint64_t phys, uint64_t flags) {
@@ -56,7 +56,7 @@ void vmm_map_page(uint64_t *pml4, uint64_t virt, uint64_t phys, uint64_t flags) 
 
     /* PD → PT (PS 비트 세트 = 2MB 대형 페이지가 이미 있으면 거절) */
     if (pd[pdi] & (1UL << 7)) {
-        printf("[vmm] ERROR: 2MB large page exists at virt=%p\n", (void *)virt);
+        kprintf("[vmm] ERROR: 2MB large page exists at virt=%p\n", (void *)virt);
         return;
     }
     if (!(pd[pdi] & VMM_PRESENT)) {

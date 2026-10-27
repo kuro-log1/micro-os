@@ -28,8 +28,8 @@ void usermode_setup(void) {
     vmm_map_page(pml4, USER_STACK_VIRT, (uint64_t)stack_phys,
                  VMM_PRESENT | VMM_WRITABLE | VMM_USER);
 
-    printf("[user] code  mapped: virt=%p phys=%p\n",
-           (void *)USER_CODE_VIRT, code_phys);
-    printf("[user] stack mapped: virt=%p phys=%p\n",
-           (void *)USER_STACK_VIRT, stack_phys);
+    klog("[user] code  mapped: virt=%p phys=%p\n",
+         (void *)USER_CODE_VIRT, code_phys);
+    klog("[user] stack mapped: virt=%p phys=%p\n",
+         (void *)USER_STACK_VIRT, stack_phys);
 }

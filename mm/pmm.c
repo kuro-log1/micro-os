@@ -57,10 +57,10 @@ void pmm_init(uint64_t mb2_info) {
         tag = (struct mb2_tag *)(((uint64_t)tag + tag->size + 7) & ~7UL);
     }
 
-    printf("[pmm] total: %lu MB  free: %lu MB  (%lu pages)\n",
-           total_pages * PAGE_SIZE / (1024 * 1024),
-           free_pages  * PAGE_SIZE / (1024 * 1024),
-           free_pages);
+    klog("[pmm] total: %lu MB  free: %lu MB  (%lu pages)\n",
+         total_pages * PAGE_SIZE / (1024 * 1024),
+         free_pages  * PAGE_SIZE / (1024 * 1024),
+         free_pages);
 }
 
 void *pmm_alloc_page(void) {
@@ -83,6 +83,6 @@ void pmm_free_page(void *addr) {
 }
 
 void pmm_dump_stats(void) {
-    printf("[pmm] free: %lu pages (%lu MB)\n",
-           free_pages, free_pages * PAGE_SIZE / (1024 * 1024));
+    klog("[pmm] free: %lu pages (%lu MB)\n",
+         free_pages, free_pages * PAGE_SIZE / (1024 * 1024));
 }

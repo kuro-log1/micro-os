@@ -35,8 +35,8 @@ void heap_init(void) {
     heap_start->used = 0;
     heap_start->next = NULL;
 
-    printf("[heap] %u MB at %p\n",
-           HEAP_PAGES * 4096 / 1024 / 1024, (void *)HEAP_BASE);
+    klog("[heap] %u MB at %p\n",
+         HEAP_PAGES * 4096 / 1024 / 1024, (void *)HEAP_BASE);
 }
 
 void *kmalloc(uint64_t size) {
@@ -83,5 +83,5 @@ void heap_dump(void) {
         if (b->used) used += b->size;
         else         free += b->size;
     }
-    printf("[heap] blocks=%lu  used=%lu B  free=%lu B\n", blocks, used, free);
+    kprintf("[heap] blocks=%lu  used=%lu B  free=%lu B\n", blocks, used, free);
 }

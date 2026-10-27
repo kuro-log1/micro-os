@@ -53,8 +53,8 @@ void tss_init(void) {
     gdt64[6] = (base >> 32) & 0xFFFFFFFFUL;
 
     __asm__ volatile("ltr %0" : : "r"((uint16_t)0x28));
-    printf("[tss] loaded at %p  rsp0=%p\n", (void *)&tss,
-           (void *)tss.rsp0);
+    klog("[tss] loaded at %p  rsp0=%p\n", (void *)&tss,
+         (void *)tss.rsp0);
 }
 
 void tss_set_rsp0(uint64_t rsp) {

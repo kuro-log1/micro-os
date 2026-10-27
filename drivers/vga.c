@@ -1,4 +1,5 @@
 #include "drivers/vga.h"
+#include "kernel/io.h"
 
 #define VGA_WIDTH  80
 #define VGA_HEIGHT 25
@@ -10,6 +11,12 @@ static uint16_t *vga   = (uint16_t *)0xB8000;
 static int       col   = 0;
 static int       row   = 0;
 static uint8_t   color = COLOR_WHITE_ON_BLACK;
+
+static void hw_cursor_sync(void) {
+    uint16_t pos = (uint16_t)(row * VGA_WIDTH + col);
+    outb(0x3D4, 0x0F); outb(0x3D5, (uint8_t)(pos & 0xFF));
+    outb(0x3D4, 0x0E); outb(0x3D5, (uint8_t)(pos >> 8));
+}
 
 static void scroll(void) {
     for (int r = 0; r < VGA_HEIGHT - 1; r++)
@@ -24,6 +31,7 @@ void vga_init(void) {
     row = 0;
     for (int i = 0; i < VGA_WIDTH * VGA_HEIGHT; i++)
         vga[i] = ((uint16_t)color << 8) | ' ';
+    hw_cursor_sync();
 }
 
 void vga_putchar(char c) {
@@ -52,6 +60,7 @@ void vga_putchar(char c) {
         scroll();
         row = VGA_HEIGHT - 1;
     }
+    hw_cursor_sync();
 }
 
 void vga_clear(void) {
@@ -59,6 +68,7 @@ void vga_clear(void) {
         vga[i] = ((uint16_t)color << 8) | ' ';
     col = 0;
     row = 0;
+    hw_cursor_sync();
 }
 
 uint8_t vga_get_color_at(int c, int r) {
