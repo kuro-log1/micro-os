@@ -3,6 +3,7 @@
 #include "drivers/serial.h"
 #include "drivers/keyboard.h"
 #include "drivers/mouse.h"
+#include "drivers/pci.h"
 #include "kernel/idt.h"
 #include "kernel/pic.h"
 #include "kernel/timer.h"
@@ -44,6 +45,7 @@ void kernel_main(uint64_t magic, uint64_t info) {
     pmm_init(info);
     vmm_init();
     heap_init();
+    pci_scan();
     usermode_setup();
     fs_init();
 

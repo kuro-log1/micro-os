@@ -11,6 +11,16 @@ static inline uint8_t inb(uint16_t port) {
     return ret;
 }
 
+static inline void outl(uint16_t port, uint32_t val) {
+    __asm__ volatile("outl %0, %1" : : "a"(val), "Nd"(port));
+}
+
+static inline uint32_t inl(uint16_t port) {
+    uint32_t ret;
+    __asm__ volatile("inl %1, %0" : "=a"(ret) : "Nd"(port));
+    return ret;
+}
+
 /* 실제 하드웨어에서 PIC 명령 사이 짧은 지연이 필요함 */
 static inline void io_wait(void) {
     outb(0x80, 0);

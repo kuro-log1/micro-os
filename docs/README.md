@@ -77,6 +77,7 @@ Part 4. 유닉스 프로세스 — "fork · exec · wait 로 프로그램을 띄
 | 12 | [step12-user-mapping](step12-user-mapping.md) | 유저가 접근할 수 있는 페이지 (U/S 비트) |
 | 13 | [step13-bootlog](step13-bootlog.md) | 타임스탬프 로그(`klog`) · 시리얼 디버그(`kprintf`) |
 | 14 | [step14-ring3](step14-ring3.md) | `iretq` 로 ring 3 진입, 첫 시스템 콜 write/exit |
+| 15 | [step15-pci](step15-pci.md) | PCI 설정 공간 읽기, 장치 목록 |
 
 ## 미리 알아 두면 좋은 것
 
