@@ -101,3 +101,73 @@ isr_common:
 
     addq $16, %rsp  /* int_no + err_code 스킵 */
     iretq
+
+/* ============================================================
+ * IRQ 스텁 (IRQ0-15 → 벡터 0x20-0x2F)
+ * PIC 리매핑 후 하드웨어 인터럽트용
+ * ============================================================ */
+.macro IRQ_STUB irq, vec
+.global irq\irq
+irq\irq:
+    pushq $0
+    pushq $\vec
+    jmp irq_common
+.endm
+
+IRQ_STUB 0,  32
+IRQ_STUB 1,  33
+IRQ_STUB 2,  34
+IRQ_STUB 3,  35
+IRQ_STUB 4,  36
+IRQ_STUB 5,  37
+IRQ_STUB 6,  38
+IRQ_STUB 7,  39
+IRQ_STUB 8,  40
+IRQ_STUB 9,  41
+IRQ_STUB 10, 42
+IRQ_STUB 11, 43
+IRQ_STUB 12, 44
+IRQ_STUB 13, 45
+IRQ_STUB 14, 46
+IRQ_STUB 15, 47
+
+.extern irq_handler
+
+irq_common:
+    pushq %rax
+    pushq %rbx
+    pushq %rcx
+    pushq %rdx
+    pushq %rsi
+    pushq %rdi
+    pushq %rbp
+    pushq %r8
+    pushq %r9
+    pushq %r10
+    pushq %r11
+    pushq %r12
+    pushq %r13
+    pushq %r14
+    pushq %r15
+
+    movq %rsp, %rdi
+    call irq_handler
+
+    popq %r15
+    popq %r14
+    popq %r13
+    popq %r12
+    popq %r11
+    popq %r10
+    popq %r9
+    popq %r8
+    popq %rbp
+    popq %rdi
+    popq %rsi
+    popq %rdx
+    popq %rcx
+    popq %rbx
+    popq %rax
+
+    addq $16, %rsp
+    iretq

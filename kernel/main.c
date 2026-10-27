@@ -2,6 +2,8 @@
 #include "drivers/vga.h"
 #include "drivers/serial.h"
 #include "kernel/idt.h"
+#include "kernel/pic.h"
+#include "kernel/timer.h"
 #include "lib/printf.h"
 
 void kernel_main(uint64_t magic, uint64_t info) {
@@ -16,9 +18,10 @@ void kernel_main(uint64_t magic, uint64_t info) {
     printf("============================\n");
 
     idt_init();
+    pic_init();
+    irq_init();
+    timer_init(100);
+    __asm__ volatile("sti");
 
-    /* [실습] 주석을 풀면 #DE(0번) 예외 → KERNEL PANIC 화면 */
-    /* volatile int zero = 0; printf("%d\n", 1 / zero); */
-
-    for (;;) __asm__ volatile("hlt");
+    for (;;) __asm__ volatile("sti; hlt");
 }

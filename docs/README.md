@@ -65,6 +65,7 @@ Part 4. 유닉스 프로세스 — "fork · exec · wait 로 프로그램을 띄
 | 01-4 | [step01-4-vga-serial](step01-4-vga-serial.md) | VGA · 시리얼 드라이버, 포트 I/O, 최소 문자열 함수 |
 | 01-5 | [step01-boot](step01-boot.md) | 작은 `printf` — Step 01 완성 |
 | 02 | [step02-idt](step02-idt.md) | CPU 예외가 나면 레지스터를 덤프하고 멈추는 틀 |
+| 03 | [step03-pic-timer](step03-pic-timer.md) | 하드웨어 인터럽트(IRQ)를 C 함수로 받는 틀 + 100Hz 타이머 |
 
 ## 미리 알아 두면 좋은 것
 

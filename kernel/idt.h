@@ -12,3 +12,7 @@ typedef struct {
 } __attribute__((packed)) registers_t;
 
 void idt_init(void);
+
+typedef void (*irq_handler_t)(registers_t *);
+void irq_init(void);
+void irq_install_handler(int irq, irq_handler_t fn);
