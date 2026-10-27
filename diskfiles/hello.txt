@@ -1,0 +1,2 @@
+Hello from ext2!
+This file lives on a real disk.

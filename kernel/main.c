@@ -3,6 +3,7 @@
 #include "drivers/serial.h"
 #include "drivers/keyboard.h"
 #include "drivers/mouse.h"
+#include "drivers/ata.h"
 #include "drivers/pci.h"
 #include "kernel/idt.h"
 #include "kernel/pic.h"
@@ -46,6 +47,13 @@ void kernel_main(uint64_t magic, uint64_t info) {
     vmm_init();
     heap_init();
     pci_scan();
+    ata_identify();
+
+    /* [실습] LBA 2 = 디스크 1024바이트 지점 = ext2 슈퍼블록. 오프셋 56의 매직 넘버가 0xef53인지 확인 */
+    static uint8_t sec[512];
+    if (ata_read_sector(2, sec) >= 0)
+        printf("[test] ext2 magic=0x%x\n", *(uint16_t *)(sec + 56));
+
     usermode_setup();
     fs_init();
 

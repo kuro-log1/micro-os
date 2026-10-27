@@ -78,6 +78,7 @@ Part 4. 유닉스 프로세스 — "fork · exec · wait 로 프로그램을 띄
 | 13 | [step13-bootlog](step13-bootlog.md) | 타임스탬프 로그(`klog`) · 시리얼 디버그(`kprintf`) |
 | 14 | [step14-ring3](step14-ring3.md) | `iretq` 로 ring 3 진입, 첫 시스템 콜 write/exit |
 | 15 | [step15-pci](step15-pci.md) | PCI 설정 공간 읽기, 장치 목록 |
+| 16 | [step16-ata](step16-ata.md) | 디스크 섹터 읽기/쓰기 (ATA PIO) |
 
 ## 미리 알아 두면 좋은 것
 

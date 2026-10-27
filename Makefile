@@ -21,7 +21,11 @@ C_OBJS  = $(addprefix $(BUILD)/, $(C_SRCS:.c=.o))
 S_OBJS  = $(addprefix $(BUILD)/, $(S_SRCS:.s=.o))
 OBJS    = $(S_OBJS) $(C_OBJS)
 
-.PHONY: all clean qemu
+DISK      = disk.img
+DISKFILES = diskfiles
+GENEXT2FS = genext2fs
+
+.PHONY: all clean qemu disk
 
 all: $(ISO)
 
@@ -44,12 +48,18 @@ $(ISO_DIR)/boot/grub/grub.cfg: grub.cfg
 $(ISO): $(KERNEL) $(ISO_DIR)/boot/grub/grub.cfg
 	$(MKRSC) -o $@ $(ISO_DIR)
 
+disk: $(DISK)
+
+$(DISK): $(wildcard $(DISKFILES)/*)
+	$(GENEXT2FS) -b 16384 -B 1024 -N 1024 -d $(DISKFILES) -L "micro-os" $(DISK)
+
 clean:
 	rm -rf $(BUILD) $(KERNEL) $(ISO)
 
-qemu: $(ISO)
+qemu: $(ISO) $(DISK)
 	qemu-system-x86_64 \
 	    -cdrom $(ISO) \
+	    -drive file=$(DISK),format=raw,if=ide \
 	    -m 512M \
 	    -serial stdio \
 	    -display cocoa,zoom-to-fit=on
