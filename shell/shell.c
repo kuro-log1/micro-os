@@ -2,6 +2,7 @@
 #include "drivers/keyboard.h"
 #include "drivers/vga.h"
 #include "fs/fs.h"
+#include "fs/ext2.h"
 #include "lib/printf.h"
 #include "lib/string.h"
 
@@ -42,7 +43,8 @@ static int split(char *line, char **argv) {
 }
 
 void shell_run(void) {
-    printf("\nmicro-os shell. 'help' for commands.\n");
+    vga_clear();
+    printf("micro-os shell. 'help' for commands.\n");
 
     char  line[LINE_MAX];
     char *argv[ARGC_MAX];
@@ -63,6 +65,8 @@ void shell_run(void) {
             printf("  mkdir <name>    create directory\n");
             printf("  touch <name>    create file\n");
             printf("  cd <name>       change directory\n");
+            printf("  cat <file>      print file contents (disk)\n");
+            printf("  write <file> <text>  write text to disk file\n");
         } else if (strcmp(argv[0], "clear") == 0) {
             vga_clear();
         } else if (strcmp(argv[0], "echo") == 0) {
@@ -74,7 +78,7 @@ void shell_run(void) {
         } else if (strcmp(argv[0], "pwd") == 0) {
             fs_pwd();
         } else if (strcmp(argv[0], "ls") == 0) {
-            fs_ls(fs_cwd());
+            ext2_dir_ls(EXT2_ROOT_INO);
         } else if (strcmp(argv[0], "mkdir") == 0) {
             if (argc < 2) printf("usage: mkdir <name>\n");
             else fs_mkdir(fs_cwd(), argv[1]);
@@ -84,6 +88,34 @@ void shell_run(void) {
         } else if (strcmp(argv[0], "cd") == 0) {
             if (argc < 2) printf("usage: cd <name>\n");
             else fs_cd(argv[1]);
+        } else if (strcmp(argv[0], "cat") == 0) {
+            if (argc < 2) {
+                printf("usage: cat <file>\n");
+            } else {
+                uint32_t ino = ext2_dir_lookup(EXT2_ROOT_INO, argv[1]);
+                if (ino == 0) {
+                    printf("cat: %s: no such file\n", argv[1]);
+                } else {
+                    static char filebuf[4096];
+                    int n = ext2_read_file(ino, filebuf, sizeof(filebuf) - 1);
+                    if (n <= 0) {
+                        printf("cat: read error\n");
+                    } else {
+                        filebuf[n] = '\0';
+                        printf("%s", filebuf);
+                    }
+                }
+            }
+        } else if (strcmp(argv[0], "write") == 0) {
+            if (argc < 3) {
+                printf("usage: write <file> <text>\n");
+            } else {
+                if (ext2_write_file(EXT2_ROOT_INO, argv[1],
+                                    argv[2], strlen(argv[2])) == 0)
+                    printf("wrote '%s'\n", argv[1]);
+                else
+                    printf("write failed\n");
+            }
         } else {
             printf("unknown: %s\n", argv[0]);
         }

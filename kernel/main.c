@@ -20,6 +20,7 @@
 #include "proc/scheduler.h"
 #include "shell/shell.h"
 #include "fs/fs.h"
+#include "fs/ext2.h"
 #include "lib/printf.h"
 
 void kernel_main(uint64_t magic, uint64_t info) {
@@ -48,14 +49,11 @@ void kernel_main(uint64_t magic, uint64_t info) {
     heap_init();
     pci_scan();
     ata_identify();
-
-    /* [실습] LBA 2 = 디스크 1024바이트 지점 = ext2 슈퍼블록. 오프셋 56의 매직 넘버가 0xef53인지 확인 */
-    static uint8_t sec[512];
-    if (ata_read_sector(2, sec) >= 0)
-        printf("[test] ext2 magic=0x%x\n", *(uint16_t *)(sec + 56));
-
     usermode_setup();
     fs_init();
+    ext2_init();
+    klog("[ext2] root dir:\n");
+    ext2_dir_ls(EXT2_ROOT_INO);
 
     process_t *idle = process_create_idle();
     scheduler_init(idle);
