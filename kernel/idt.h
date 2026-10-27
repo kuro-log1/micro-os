@@ -12,6 +12,7 @@ typedef struct {
 } __attribute__((packed)) registers_t;
 
 void idt_init(void);
+void idt_set_user_gate(int n, void (*fn)(void));
 
 typedef void (*irq_handler_t)(registers_t *);
 void irq_init(void);

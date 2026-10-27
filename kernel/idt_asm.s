@@ -171,3 +171,56 @@ irq_common:
 
     addq $16, %rsp
     iretq
+
+/* ============================================================
+ * int 0x80 시스템 콜 진입점 (DPL=3 게이트, 유저 모드 호출 가능)
+ *
+ * ring 3에서 호출 시 CPU가 추가로 push: user_rsp, user_ss
+ * iretq가 이 5개 값을 소비하며 ring 3으로 복귀한다.
+ * ============================================================ */
+.global isr128
+isr128:
+    pushq $0       /* 가짜 err_code */
+    pushq $128     /* int_no = 0x80  */
+    jmp syscall_common
+
+.extern syscall_handler
+
+syscall_common:
+    pushq %rax
+    pushq %rbx
+    pushq %rcx
+    pushq %rdx
+    pushq %rsi
+    pushq %rdi
+    pushq %rbp
+    pushq %r8
+    pushq %r9
+    pushq %r10
+    pushq %r11
+    pushq %r12
+    pushq %r13
+    pushq %r14
+    pushq %r15
+
+    movq %rsp, %rdi
+    call syscall_handler
+
+    popq %r15
+    popq %r14
+    popq %r13
+    popq %r12
+    popq %r11
+    popq %r10
+    popq %r9
+    popq %r8
+    popq %rbp
+    popq %rdi
+    popq %rsi
+    popq %rdx
+    popq %rcx
+    popq %rbx
+    popq %rax
+
+    addq $16, %rsp  /* int_no + err_code 스킵 */
+    iretq

@@ -20,7 +20,8 @@ typedef struct {
     uint64_t base;
 } __attribute__((packed)) idtr_t;
 
-#define INT_GATE 0x8E  /* Present=1, DPL=0, Type=E(인터럽트 게이트) */
+#define INT_GATE      0x8E  /* Present=1, DPL=0, Type=E */
+#define INT_GATE_USER 0xEE  /* Present=1, DPL=3, Type=E (유저에서 호출 가능) */
 
 static idt_gate_t idt[256];
 static idtr_t     idtr;
@@ -59,6 +60,17 @@ static void (*isr_table[32])(void) = {
     isr16, isr17, isr18, isr19, isr20, isr21, isr22, isr23,
     isr24, isr25, isr26, isr27, isr28, isr29, isr30, isr31,
 };
+
+void idt_set_user_gate(int n, void (*fn)(void)) {
+    uint64_t addr = (uint64_t)fn;
+    idt[n].offset_low  = addr & 0xFFFF;
+    idt[n].selector    = 0x08;
+    idt[n].ist         = 0;
+    idt[n].type_attr   = INT_GATE_USER;
+    idt[n].offset_mid  = (addr >> 16) & 0xFFFF;
+    idt[n].offset_high = (addr >> 32) & 0xFFFFFFFF;
+    idt[n].zero        = 0;
+}
 
 static void idt_set_gate(int n, void (*fn)(void)) {
     uint64_t addr = (uint64_t)fn;

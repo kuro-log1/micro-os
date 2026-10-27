@@ -175,12 +175,12 @@ for (;;) __asm__ volatile("sti; hlt");
 - [x] `kernel/main.c`에서 `tss_init()` 호출
 - [x] 빌드 + QEMU: 셸 정상 동작 확인 ✓
 
-### Step 2 — int 0x80 게이트 등록
-- [ ] `kernel/idt_asm.s`에 `isr128` 스텁 + `syscall_common` 추가
-- [ ] `kernel/idt.c`에 `idt_set_user_gate()` (DPL=3 게이트) 추가
-- [ ] `kernel/syscall.c` 작성 (syscall_init: int 0x80 등록, 기본 핸들러)
-- [ ] `kernel/main.c`에서 `syscall_init()` 호출
-- [ ] 빌드 + QEMU: 커널에서 int 0x80 테스트 호출 확인 ✓
+### Step 2 — int 0x80 게이트 등록 ✅
+- [x] `kernel/idt_asm.s`에 `isr128` 스텁 + `syscall_common` 추가
+- [x] `kernel/idt.c`에 `idt_set_user_gate()` (DPL=3 게이트) 추가
+- [x] `kernel/syscall.c` 작성 (syscall_init: int 0x80 등록, 기본 핸들러)
+- [x] `kernel/main.c`에서 `syscall_init()` 호출
+- [x] 빌드 + QEMU: 커널에서 int 0x80 테스트 호출 확인 ✓
 
 ### Step 3 — 유저 메모리 매핑
 - [ ] `mm/vmm.c` 중간 페이지 테이블에 U/S 비트 전파 수정
