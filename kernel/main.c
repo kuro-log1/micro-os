@@ -11,21 +11,9 @@
 #include "mm/heap.h"
 #include "proc/process.h"
 #include "proc/scheduler.h"
+#include "shell/shell.h"
+#include "fs/fs.h"
 #include "lib/printf.h"
-
-/* [실습] 두 커널 스레드가 타이머 선점으로 번갈아 실행된다 */
-static void busy_wait(void) {
-    for (volatile int i = 0; i < 20000000; i++)
-        ;
-}
-
-static void thread_a(void) {
-    for (;;) { printf("A"); busy_wait(); }
-}
-
-static void thread_b(void) {
-    for (;;) { printf("B"); busy_wait(); }
-}
 
 void kernel_main(uint64_t magic, uint64_t info) {
     (void)magic;
@@ -48,11 +36,11 @@ void kernel_main(uint64_t magic, uint64_t info) {
     pmm_init(info);
     vmm_init();
     heap_init();
+    fs_init();
 
     process_t *idle = process_create_idle();
     scheduler_init(idle);
-    scheduler_add(process_create(thread_a));
-    scheduler_add(process_create(thread_b));
+    scheduler_add(process_create(shell_run));
 
     schedule();
 

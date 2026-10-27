@@ -71,6 +71,7 @@ Part 4. 유닉스 프로세스 — "fork · exec · wait 로 프로그램을 띄
 | 06 | [step06-vmm](step06-vmm.md) | 가상 주소 ↔ 물리 프레임 매핑 (`vmm_map_page`) |
 | 07 | [step07-heap](step07-heap.md) | 크기가 제각각인 메모리를 주는 `kmalloc` / `kfree` |
 | 08 | [step08-process](step08-process.md) | PCB + `swtch` 로 커널 스레드를 번갈아 실행 |
+| 09 | [step09-shell](step09-shell.md) | 명령을 입력받는 셸, 메모리 위의 디렉터리 트리 |
 
 ## 미리 알아 두면 좋은 것
 
