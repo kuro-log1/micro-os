@@ -11,6 +11,7 @@
 #include "kernel/tss.h"
 #include "kernel/syscall.h"
 #include "kernel/usermode.h"
+#include "kernel/elf.h"
 #include "kernel/cpuid.h"
 #include "kernel/mmap.h"
 #include "mm/pmm.h"
@@ -49,7 +50,6 @@ void kernel_main(uint64_t magic, uint64_t info) {
     heap_init();
     pci_scan();
     ata_identify();
-    usermode_setup();
     fs_init();
     ext2_init();
     klog("[ext2] root dir:\n");
@@ -58,8 +58,13 @@ void kernel_main(uint64_t magic, uint64_t info) {
     process_t *idle = process_create_idle();
     scheduler_init(idle);
 
-    /* usermode_setup이 매핑한 기계어 코드를 ring 3 프로세스로 실행 (스택은 위에서 아래로 자람) */
-    scheduler_add(process_create_user(USER_CODE_VIRT, USER_STACK_VIRT + 4096));
+    /* /init ELF 로드 후 ring 3 프로세스로 등록 */
+    uint64_t init_entry, init_rsp;
+    if (elf_load("init", &init_entry, &init_rsp) == 0)
+        scheduler_add(process_create_user(init_entry, init_rsp));
+    else
+        klog("[init] WARNING: /init not found, running shell in ring 0\n");
+
     scheduler_add(process_create(shell_run));
 
     schedule();
