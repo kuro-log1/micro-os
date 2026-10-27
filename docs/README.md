@@ -68,6 +68,7 @@ Part 4. 유닉스 프로세스 — "fork · exec · wait 로 프로그램을 띄
 | 03 | [step03-pic-timer](step03-pic-timer.md) | 하드웨어 인터럽트(IRQ)를 C 함수로 받는 틀 + 100Hz 타이머 |
 | 04 | [step04-keyboard](step04-keyboard.md) | 키보드 링 버퍼 + `keyboard_getchar()`, 마우스 커서 |
 | 05 | [step05-pmm](step05-pmm.md) | 4KB 물리 프레임을 빌려 주고 돌려받는 할당기 |
+| 06 | [step06-vmm](step06-vmm.md) | 가상 주소 ↔ 물리 프레임 매핑 (`vmm_map_page`) |
 
 ## 미리 알아 두면 좋은 것
 

@@ -1,6 +1,7 @@
 #include "kernel/idt.h"
 #include "kernel/panic.h"
 #include "kernel/pic.h"
+#include "lib/printf.h"
 #include <stdint.h>
 
 /* 64-bit IDT 게이트 디스크립터 (16바이트) */
@@ -83,6 +84,16 @@ static const char *exc_names[] = {
 
 /* idt_asm.s의 isr_common에서 호출됨 */
 void exception_handler(registers_t *r) {
+    /* #PF(14)는 CR2에 폴트 발생 가상 주소가 담김 */
+    if (r->int_no == 14) {
+        uint64_t cr2;
+        __asm__ volatile("mov %%cr2, %0" : "=r"(cr2));
+        printf("[vmm] Page Fault: addr=%p  err=0x%lx (%s %s %s)\n",
+               (void *)cr2, r->err_code,
+               (r->err_code & 1) ? "protection"  : "not-present",
+               (r->err_code & 2) ? "write"        : "read",
+               (r->err_code & 4) ? "user"         : "kernel");
+    }
     const char *name = (r->int_no < 21) ? exc_names[r->int_no] : "Reserved";
     panic(r, name);
 }
