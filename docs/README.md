@@ -74,6 +74,7 @@ Part 4. 유닉스 프로세스 — "fork · exec · wait 로 프로그램을 띄
 | 09 | [step09-shell](step09-shell.md) | 명령을 입력받는 셸, 메모리 위의 디렉터리 트리 |
 | 10 | [step10-gdt-tss](step10-gdt-tss.md) | ring 3 세그먼트, ring 3 → 0 전환 때 쓸 커널 스택(TSS) |
 | 11 | [step11-syscall-gate](step11-syscall-gate.md) | 유저가 커널을 부르는 문 `int 0x80` |
+| 12 | [step12-user-mapping](step12-user-mapping.md) | 유저가 접근할 수 있는 페이지 (U/S 비트) |
 
 ## 미리 알아 두면 좋은 것
 

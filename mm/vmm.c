@@ -34,11 +34,15 @@ void vmm_map_page(uint64_t *pml4, uint64_t virt, uint64_t phys, uint64_t flags) 
     uint64_t pdi   = PD_IDX(virt);
     uint64_t pti   = PT_IDX(virt);
 
+    /* 중간 테이블 엔트리에도 U/S 비트를 전파해야 유저 접근이 가능하다.
+     * x86-64는 PML4→PDPT→PD→PT 모든 레벨에 U/S=1이 있어야 유저 모드 접근을 허용한다. */
+    uint64_t parent_flags = VMM_PRESENT | VMM_WRITABLE | (flags & VMM_USER);
+
     /* PML4 → PDPT */
     if (!(pml4[pml4i] & VMM_PRESENT)) {
         uint64_t *pdpt = pmm_alloc_page();
         clear_page(pdpt);
-        pml4[pml4i] = (uint64_t)pdpt | VMM_PRESENT | VMM_WRITABLE;
+        pml4[pml4i] = (uint64_t)pdpt | parent_flags;
     }
     uint64_t *pdpt = (uint64_t *)ENTRY_ADDR(pml4[pml4i]);
 
@@ -46,7 +50,7 @@ void vmm_map_page(uint64_t *pml4, uint64_t virt, uint64_t phys, uint64_t flags) 
     if (!(pdpt[pdpti] & VMM_PRESENT)) {
         uint64_t *pd = pmm_alloc_page();
         clear_page(pd);
-        pdpt[pdpti] = (uint64_t)pd | VMM_PRESENT | VMM_WRITABLE;
+        pdpt[pdpti] = (uint64_t)pd | parent_flags;
     }
     uint64_t *pd = (uint64_t *)ENTRY_ADDR(pdpt[pdpti]);
 
@@ -58,7 +62,7 @@ void vmm_map_page(uint64_t *pml4, uint64_t virt, uint64_t phys, uint64_t flags) 
     if (!(pd[pdi] & VMM_PRESENT)) {
         uint64_t *pt = pmm_alloc_page();
         clear_page(pt);
-        pd[pdi] = (uint64_t)pt | VMM_PRESENT | VMM_WRITABLE;
+        pd[pdi] = (uint64_t)pt | parent_flags;
     }
     uint64_t *pt = (uint64_t *)ENTRY_ADDR(pd[pdi]);
 

@@ -182,11 +182,11 @@ for (;;) __asm__ volatile("sti; hlt");
 - [x] `kernel/main.c`에서 `syscall_init()` 호출
 - [x] 빌드 + QEMU: 커널에서 int 0x80 테스트 호출 확인 ✓
 
-### Step 3 — 유저 메모리 매핑
-- [ ] `mm/vmm.c` 중간 페이지 테이블에 U/S 비트 전파 수정
-- [ ] `kernel/usermode.c` 작성 (`usermode_setup`: 코드/스택 페이지 할당·매핑, 유저 프로그램 복사)
-- [ ] `kernel/main.c`에서 `usermode_setup()` 호출 후 매핑 성공 로그 확인
-- [ ] 빌드 + QEMU: Page Fault 없이 매핑 완료 로그 확인 ✓
+### Step 3 — 유저 메모리 매핑 ✅
+- [x] `mm/vmm.c` 중간 페이지 테이블에 U/S 비트 전파 수정
+- [x] `kernel/usermode.c` 작성 (`usermode_setup`: 코드/스택 페이지 할당·매핑, 유저 프로그램 복사)
+- [x] `kernel/main.c`에서 `usermode_setup()` 호출 후 매핑 성공 로그 확인
+- [x] 빌드 + QEMU: Page Fault 없이 매핑 완료 로그 확인 ✓
 
 ### Step 4 — Ring 3 진입 + 유저 프로그램 실행
 - [ ] `kernel/usermode.c`에 `jump_to_usermode()` (iretq 방식) 추가

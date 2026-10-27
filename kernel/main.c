@@ -8,6 +8,7 @@
 #include "kernel/timer.h"
 #include "kernel/tss.h"
 #include "kernel/syscall.h"
+#include "kernel/usermode.h"
 #include "mm/pmm.h"
 #include "mm/vmm.h"
 #include "mm/heap.h"
@@ -37,12 +38,10 @@ void kernel_main(uint64_t magic, uint64_t info) {
     mouse_init();
     __asm__ volatile("sti");
 
-    /* Step 2 테스트: 커널(ring 0)에서 int 0x80 호출 */
-    __asm__ volatile("mov $0x42, %%rax\n\tint $0x80" ::: "rax");
-
     pmm_init(info);
     vmm_init();
     heap_init();
+    usermode_setup();
     fs_init();
 
     process_t *idle = process_create_idle();
