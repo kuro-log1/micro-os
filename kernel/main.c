@@ -49,6 +49,9 @@ void kernel_main(uint64_t magic, uint64_t info) {
 
     process_t *idle = process_create_idle();
     scheduler_init(idle);
+
+    /* usermode_setup이 매핑한 기계어 코드를 ring 3 프로세스로 실행 (스택은 위에서 아래로 자람) */
+    scheduler_add(process_create_user(USER_CODE_VIRT, USER_STACK_VIRT + 4096));
     scheduler_add(process_create(shell_run));
 
     schedule();

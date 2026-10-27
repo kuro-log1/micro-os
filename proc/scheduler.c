@@ -25,12 +25,16 @@ void schedule(void) {
     process_t *prev = current;
     process_t *next = current->next;
 
-    if (prev == next) return;  /* 프로세스가 하나뿐 */
+    /* PROC_DEAD 프로세스는 건너뜀 */
+    while (next != prev && next->state == PROC_DEAD)
+        next = next->next;
 
-    prev->state = PROC_READY;
+    if (prev == next) return;
+
+    if (prev->state != PROC_DEAD)
+        prev->state = PROC_READY;
     current     = next;
     next->state = PROC_RUNNING;
 
     swtch(&prev->rsp, next->rsp);
-    /* 이 줄은 나중에 다시 이 프로세스로 스위치백 됐을 때 실행됨 */
 }

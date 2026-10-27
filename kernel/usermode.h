@@ -9,3 +9,4 @@
 #define USER_STACK_VIRT 0x500000000UL   /* 20GB */
 
 void usermode_setup(void);
+void jump_to_usermode(uint64_t rip, uint64_t rsp);

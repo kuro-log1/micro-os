@@ -38,11 +38,15 @@ void vmm_map_page(uint64_t *pml4, uint64_t virt, uint64_t phys, uint64_t flags) 
      * x86-64는 PML4→PDPT→PD→PT 모든 레벨에 U/S=1이 있어야 유저 모드 접근을 허용한다. */
     uint64_t parent_flags = VMM_PRESENT | VMM_WRITABLE | (flags & VMM_USER);
 
-    /* PML4 → PDPT */
+    /* PML4 → PDPT
+     * 기존 엔트리가 있어도 U/S 비트가 빠져 있으면 OR로 추가한다.
+     * (boot.s가 U/S 없이 PML4[0]을 만들어 둠 — 16GB 유저 주소도 PML4[0] 공유) */
     if (!(pml4[pml4i] & VMM_PRESENT)) {
         uint64_t *pdpt = pmm_alloc_page();
         clear_page(pdpt);
         pml4[pml4i] = (uint64_t)pdpt | parent_flags;
+    } else {
+        pml4[pml4i] |= (flags & VMM_USER);
     }
     uint64_t *pdpt = (uint64_t *)ENTRY_ADDR(pml4[pml4i]);
 
@@ -51,6 +55,8 @@ void vmm_map_page(uint64_t *pml4, uint64_t virt, uint64_t phys, uint64_t flags) 
         uint64_t *pd = pmm_alloc_page();
         clear_page(pd);
         pdpt[pdpti] = (uint64_t)pd | parent_flags;
+    } else {
+        pdpt[pdpti] |= (flags & VMM_USER);
     }
     uint64_t *pd = (uint64_t *)ENTRY_ADDR(pdpt[pdpti]);
 
@@ -63,6 +69,8 @@ void vmm_map_page(uint64_t *pml4, uint64_t virt, uint64_t phys, uint64_t flags) 
         uint64_t *pt = pmm_alloc_page();
         clear_page(pt);
         pd[pdi] = (uint64_t)pt | parent_flags;
+    } else {
+        pd[pdi] |= (flags & VMM_USER);
     }
     uint64_t *pt = (uint64_t *)ENTRY_ADDR(pd[pdi]);
 

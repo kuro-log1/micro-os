@@ -2,6 +2,7 @@
 #include "proc/scheduler.h"
 #include "mm/heap.h"
 #include "mm/vmm.h"
+#include "kernel/usermode.h"
 #include <stdint.h>
 #include <stddef.h>
 
@@ -37,23 +38,61 @@ process_t *process_create(void (*entry)(void)) {
     *--sp = 0;  /* r14 */
     *--sp = 0;  /* r15 */
 
-    p->rsp   = (uint64_t)sp;
-    p->pml4  = vmm_get_pml4();
-    p->stack = stk;
-    p->state = PROC_READY;
-    p->pid   = next_pid++;
-    p->entry = entry;
-    p->next  = NULL;
+    p->rsp      = (uint64_t)sp;
+    p->user_rip = 0;
+    p->user_rsp = 0;
+    p->pml4     = vmm_get_pml4();
+    p->stack    = stk;
+    p->state    = PROC_READY;
+    p->pid      = next_pid++;
+    p->entry    = entry;
+    p->next     = NULL;
     return p;
 }
 
 process_t *process_create_idle(void) {
     process_t *p = kmalloc(sizeof(process_t));
-    p->rsp   = 0;          /* swtch가 첫 번째 스위치 시 채움 */
-    p->pml4  = vmm_get_pml4();
-    p->stack = NULL;
-    p->state = PROC_RUNNING;
-    p->pid   = next_pid++;
-    p->next  = NULL;
+    p->rsp      = 0;
+    p->user_rip = 0;
+    p->user_rsp = 0;
+    p->pml4     = vmm_get_pml4();
+    p->stack    = NULL;
+    p->state    = PROC_RUNNING;
+    p->pid      = next_pid++;
+    p->entry    = NULL;
+    p->next     = NULL;
+    return p;
+}
+
+/* 유저 프로세스 트램폴린: ring 0 → ring 3 전환 */
+static void user_proc_trampoline(void) {
+    __asm__ volatile("sti");
+    process_t *p = current_process();
+    jump_to_usermode(p->user_rip, p->user_rsp);
+    /* 돌아오지 않음: exit 시스템콜이 schedule()을 호출 */
+}
+
+process_t *process_create_user(uint64_t user_rip, uint64_t user_rsp) {
+    process_t *p   = kmalloc(sizeof(process_t));
+    uint8_t   *stk = kmalloc(STACK_SIZE);
+
+    uint64_t *sp = (uint64_t *)(stk + STACK_SIZE);
+    *--sp = (uint64_t)user_proc_trampoline;
+    *--sp = 0;  /* rbp */
+    *--sp = 0;  /* rbx */
+    *--sp = 0;  /* r12 */
+    *--sp = 0;  /* r13 */
+    *--sp = 0;  /* r14 */
+    *--sp = 0;  /* r15 */
+
+    p->rsp      = (uint64_t)sp;
+    p->user_rip = user_rip;
+    p->user_rsp = user_rsp;
+    p->pml4     = vmm_get_pml4();
+    p->stack    = stk;
+    p->state    = PROC_READY;
+    p->pid      = next_pid++;
+    p->entry    = NULL;
+    p->next     = NULL;
     return p;
 }
