@@ -9,7 +9,23 @@
 #include "mm/pmm.h"
 #include "mm/vmm.h"
 #include "mm/heap.h"
+#include "proc/process.h"
+#include "proc/scheduler.h"
 #include "lib/printf.h"
+
+/* [실습] 두 커널 스레드가 타이머 선점으로 번갈아 실행된다 */
+static void busy_wait(void) {
+    for (volatile int i = 0; i < 20000000; i++)
+        ;
+}
+
+static void thread_a(void) {
+    for (;;) { printf("A"); busy_wait(); }
+}
+
+static void thread_b(void) {
+    for (;;) { printf("B"); busy_wait(); }
+}
 
 void kernel_main(uint64_t magic, uint64_t info) {
     (void)magic;
@@ -31,19 +47,14 @@ void kernel_main(uint64_t magic, uint64_t info) {
 
     pmm_init(info);
     vmm_init();
-
     heap_init();
 
-    /* [실습] 블록 분할(kmalloc)과 병합(kfree) 관찰 */
-    void *a = kmalloc(100);
-    void *b = kmalloc(200);
-    printf("[test] a=%p b=%p\n", a, b);
-    heap_dump();
-    kfree(b);
-    kfree(a);
-    heap_dump();
+    process_t *idle = process_create_idle();
+    scheduler_init(idle);
+    scheduler_add(process_create(thread_a));
+    scheduler_add(process_create(thread_b));
 
-    /* 키보드 IRQ가 링 버퍼에 넣은 글자를 꺼내 화면에 에코 */
-    for (;;)
-        printf("%c", keyboard_getchar());
+    schedule();
+
+    for (;;) __asm__ volatile("sti; hlt");
 }
