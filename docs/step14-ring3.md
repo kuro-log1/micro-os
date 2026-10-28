@@ -1,68 +1,121 @@
 # Step 14 — ring 3 진입 & write/exit 시스템 콜
 
-> `iretq` 스택 프레임을 직접 쌓아 ring 3으로 내려가고, 손으로 짠 기계어가 `int 0x80` 으로 write와 exit를 부른다.
+Part 2의 마지막 단계입니다. 지금까지 준비한 재료를 모두 써서, 드디어 **ring 3에서 코드를 실행** 합니다.
+Step 10에서 유저 세그먼트와 TSS를, Step 11에서 시스템 콜 문을, Step 12에서 유저 페이지를 마련했습니다. 이번 단계에서는 CPU를 ring 3으로 내려보내는 함수를 만들고, ring 3 코드가 부를 첫 시스템 콜 두 개, **write** 와 **exit** 를 구현합니다.
+유저 프로그램은 손으로 짠 42바이트짜리 기계어입니다. 이 프로그램이 `int 0x80` 으로 write를 불러 `Hello from ring 3!` 를 찍고, exit를 불러 스스로 끝납니다. 셸은 그동안에도 그 뒤에도 평소처럼 동작합니다.
+이 단계는 원래 저장소의 커밋 `03c5032` 의 일부입니다.
 
-## 목표
+바뀌는 파일은 `kernel/usermode.c`(기계어와 진입 함수), `proc/process.c`·`process.h`(유저 프로세스), `proc/scheduler.c`(종료된 프로세스 건너뛰기), `kernel/syscall.c`(write/exit), `mm/vmm.c`(U/S 보완), `kernel/main.c` 입니다.
+`kernel/usermode.c` → `proc/process.c` → `kernel/syscall.c` → `proc/scheduler.c` → `mm/vmm.c` 순서로 읽으세요.
 
-`Hello from ring 3!` 출력 후 (시리얼에) `[syscall] pid N: exit(0)`, 셸은 계속 동작.
+## 내려가는 길: 인터럽트에서 돌아가는 척하기
 
-## 이 단계가 만드는 틀
+ring 0에서 ring 3으로 내려가는 전용 명령은 없습니다. 대신 x86에는 "인터럽트 처리를 마치고 원래 코드로 돌아가는" 명령 `iretq` 가 있고, 이 명령은 돌아갈 곳의 권한이 낮으면 권한도 함께 낮춥니다.
+`iretq` 는 스택에서 다섯 값을 꺼냅니다. 돌아갈 주소(rip), 코드 세그먼트(cs), 플래그(rflags), 스택 포인터(rsp), 스택 세그먼트(ss)입니다. CPU는 꺼낸 cs의 하위 2비트(RPL)를 보고 돌아갈 권한을 정합니다.
+그렇다면 이 다섯 값을 우리가 원하는 대로 직접 쌓고 `iretq` 를 실행하면, CPU는 "ring 3 코드가 인터럽트를 당했다가 돌아가는 중"이라고 믿고 ring 3으로 내려갑니다.
 
-- **`jump_to_usermode(rip, rsp)`** — 커널에서 유저로 가는 유일한 길. Step 18(ELF), 21(exec)도 이 함수로 진입
-- **유저 프로세스 = 커널 스택 + 유저 진입점** — `process_create_user(rip, rsp)` 는 Step 08의 초기 프레임 기법을 그대로 쓰되, 진입점이 `user_proc_trampoline` 이다
-- **첫 시스템 콜 2개** — `SYS_WRITE(1)`: fd 1/2면 화면+시리얼, `SYS_EXIT(60)`: `PROC_DEAD` 로 표시 후 양보
-- **`PROC_DEAD` 상태** — 스케줄러가 건너뛴다. Step 22에서 "좀비"로 발전 (부모가 회수할 때까지 남아 있음)
-- **U/S 비트 보완** — 이미 있는 상위 엔트리에도 `|= VMM_USER`
+```c
+void jump_to_usermode(uint64_t rip, uint64_t rsp) {
+    __asm__ volatile(
+        "push %0\n"              /* ss     = 0x23 (USER_DS) */
+        "push %1\n"              /* rsp    = 유저 스택 꼭대기 */
+        "pushfq\n"
+        "orq  $0x200, (%%rsp)\n" /* rflags 에 IF=1 */
+        "push %2\n"              /* cs     = 0x1B (USER_CS) */
+        "push %3\n"              /* rip    = 유저 진입점 */
+        "iretq\n"
+        : : "r"(ss), "r"(rsp), "r"(cs), "r"(rip) : "memory");
+}
+```
 
-## 만들 파일
+쌓는 순서는 `iretq` 가 꺼내는 순서의 반대입니다. 셀렉터에는 Step 10에서 이야기한 RPL 3짜리 값 `0x1B`, `0x23` 을 씁니다. rflags는 지금 값을 `pushfq` 로 복사한 뒤 IF 비트(bit 9, `0x200`)를 켭니다. 이게 없으면 ring 3 코드가 인터럽트가 꺼진 채로 돌아서 타이머가 울리지 않고, 셸로 돌아올 수 없습니다.
+이 함수는 돌아오지 않습니다. `iretq` 이후의 CPU는 ring 3에서 유저 코드를 실행하고 있습니다. 앞으로 커널에서 유저 코드로 들어가는 길은 이 함수 하나뿐입니다. Step 18의 ELF 실행과 Step 21의 exec도 결국 이 함수를 부릅니다.
+유저 스택 포인터는 `USER_STACK_VIRT + 4096`, 즉 스택 페이지의 **끝** 입니다. 스택이 아래로 자라기 때문입니다.
 
-| 파일 | 역할 |
-|---|---|
-| `kernel/usermode.c` | 42바이트 기계어 `user_program` (write → exit), `jump_to_usermode` |
-| `kernel/usermode.h` | `USER_CS = 0x1B`, `USER_DS = 0x23` |
-| `proc/process.c` | `user_proc_trampoline`, `process_create_user` |
-| `proc/process.h` | `user_rip` · `user_rsp` 필드, `PROC_DEAD` |
-| `proc/scheduler.c` | DEAD 프로세스 건너뛰기 |
-| `kernel/syscall.c` | `sys_write`, `sys_exit`, switch 분기 |
-| `mm/vmm.c` | 기존 PML4/PDPT/PD 엔트리에도 USER 비트 OR |
-| `kernel/main.c` | `process_create_user(USER_CODE_VIRT, USER_STACK_VIRT + 4096)` |
+## 올라오는 길: int 0x80과 TSS
 
-원본 커밋: `03c5032` 의 일부 · 읽는 순서: `kernel/usermode.c` → `proc/process.c` → `kernel/syscall.c` → `proc/scheduler.c`
+ring 3 코드가 `int 0x80` 을 실행하면, CPU는 Step 11에서 연 DPL 3 게이트를 통과합니다. ring 3에서 ring 0으로 넘어가니, Step 10에서 이야기한 대로 먼저 TSS의 `rsp0` 에서 커널 스택 주소를 읽어 갈아탑니다. 그다음 유저의 ss, rsp, rflags, cs, rip을 그 커널 스택에 쌓고 시스템 콜 스텁으로 갑니다.
+타이머 인터럽트도 마찬가지입니다. ring 3 코드가 돌고 있을 때 타이머가 울리면 같은 방식으로 커널 스택으로 갈아타고 IRQ 스텁으로 들어갑니다. 그래서 TSS가 없으면 유저 모드에서 첫 인터럽트가 오는 순간 커널이 죽습니다.
+이 단계에서 눈여겨볼 점이 하나 있습니다. 유저 프로세스는 PCB에 자기 8KB 커널 스택을 갖고 있지만, ring 3에서 커널로 올라올 때 쓰는 스택은 그게 아니라 TSS에 적힌 **4KB 공용 스택** 입니다. 지금은 ring 3 프로세스가 하나뿐이라 문제가 없지만, 둘 이상이 되면 이 공용 스택을 함께 쓰다 서로의 데이터를 덮어쓰게 됩니다. 이 문제는 Step 22에서 해결합니다.
 
-## 핵심 개념
+## 유저 프로세스 만들기
 
-- **ring 0 → 3은 "인터럽트에서 돌아가는 척"** — `iretq` 는 스택에서 `rip, cs, rflags, rsp, ss` 를 꺼낸다. 이 다섯 개를 직접 push하고 `iretq` 하면, CPU는 cs의 RPL=3을 보고 ring 3으로 전환한다
-  ```
-  push ss (0x23) → push rsp(유저 스택 꼭대기) → pushfq + IF=1 → push cs (0x1B) → push rip(진입점) → iretq
-  ```
-- **ring 3 → 0은 `int 0x80`** — CPU가 TSS.rsp0으로 스택을 바꾸고 `ss, rsp, rflags, cs, rip` 를 push (Step 10에서 준비한 것)
-- **스택은 아래로 자란다** — 그래서 스택 rsp는 페이지의 **끝** `USER_STACK_VIRT + 4096`
-- **기계어를 손으로?** 아직 디스크도 ELF 로더도 없어서, 위치에 상관없이 도는 짧은 코드를 바이트 배열로 넣었다. `lea rsi, [rip+21]` 로 바로 뒤 문자열 주소를 구한다. (Step 18에서 진짜 C 프로그램으로 교체)
-- **exit는 돌아오지 않는다** — DEAD로 표시하고 `schedule()`. 스케줄러가 다시는 고르지 않으니 그 다음 줄은 실행되지 않는다
-- **왜 vmm 보완이 필요했나**: `0x400000000` 의 PML4 인덱스는 0. boot.s가 만든 PML4[0] 엔트리에 U/S가 없어 Step 12 코드만으로는 ring 3 접근이 #PF였다
+유저 코드를 실행하는 것도 하나의 프로세스여야 셸과 번갈아 돌 수 있습니다. `process_create_user(rip, rsp)` 는 Step 08의 `process_create` 와 똑같은 "가짜 초기 프레임" 기법을 쓰되, `ret` 이 점프할 곳만 `user_proc_trampoline` 으로 바꿉니다. PCB에는 유저 진입점과 유저 스택을 담을 `user_rip`, `user_rsp` 필드가 추가됩니다.
 
-## 직접 만든다면
+```c
+static void user_proc_trampoline(void) {
+    __asm__ volatile("sti");
+    process_t *p = current_process();
+    jump_to_usermode(p->user_rip, p->user_rsp);
+}
+```
 
-1. `jump_to_usermode` 와 기계어 `hlt` 하나 → ring 3에서 `hlt` 는 특권 명령이라 **#GP가 나면 성공** (ring 3에 도착했다는 증거)
-2. 기계어를 `int 0x80` 하나로 바꾸고 `syscall_handler` 에서 출력 확인
-3. write/exit 구현, 기계어 완성
-4. `process_create_user` 로 프로세스화 (셸과 동시에 돌게)
+스케줄러가 이 프로세스를 처음 고르면, `swtch` 가 `ret` 으로 이 트램폴린에 들어오고, 트램폴린이 `jump_to_usermode` 로 ring 3에 내려갑니다. 같은 기법에 진입점만 바꿔 완전히 다른 종류의 프로세스를 만든 것입니다. Step 20의 fork에서 이 기법을 한 번 더 보게 됩니다.
 
-## 확인
+## 손으로 짠 첫 유저 프로그램
 
-- 화면/시리얼에 `Hello from ring 3!`, 시리얼에 exit 로그
-- `info registers` (QEMU 모니터) 로 cs=`0x1b` 를 잡아 보는 것도 좋다
+아직 디스크도, 실행 파일을 읽을 로더도 없습니다. 그래서 유저 프로그램은 커널 소스 안의 바이트 배열입니다. Step 12의 `hlt` 한 바이트가 이번에 42바이트 기계어와 문자열로 바뀝니다.
 
-## 자주 막히는 곳
+```
++0  : mov rax, 1          ; SYS_WRITE
++7  : mov rdi, 1          ; fd = stdout
++14 : lea rsi, [rip+21]   ; → +42 (문자열 주소)
++21 : mov rdx, 19         ; 길이 19
++28 : int 0x80
++30 : mov rax, 60         ; SYS_EXIT
++37 : xor rdi, rdi        ; 종료 코드 0
++40 : int 0x80
++42 : "Hello from ring 3!\n"
+```
 
-| 증상 | 원인 |
-|---|---|
-| `iretq` 에서 #GP | 셀렉터 RPL이 3이 아님(`0x18` 대신 `0x1B`), 유저 세그먼트 DPL 틀림 |
-| 첫 명령에서 #PF `err=0x5` (user, read, protection) | 상위 엔트리 U/S 누락 — 이 단계의 vmm 보완 |
-| `int 0x80` 에서 #GP | 0x80 게이트 DPL이 0 |
-| 유저에서 인터럽트가 걸리자 커널이 죽음 | TSS.rsp0 미설정 / TSS 로드 안 됨 |
+Step 11에서 정한 호출 규약 그대로입니다. `rax` 에 번호, `rdi`, `rsi`, `rdx` 에 인자를 담고 `int 0x80` 을 실행합니다.
+흥미로운 부분은 `lea rsi, [rip+21]` 입니다. 문자열의 주소를 절대 주소로 쓰지 않고, "이 명령 다음 위치에서 21바이트 뒤"라는 상대 주소로 구합니다. 이 명령은 +14에 있고 길이가 7바이트라 다음 명령은 +21이며, 거기서 21을 더하면 +42, 문자열의 시작입니다. 이렇게 짜 두면 코드를 어느 주소에 올려도 동작합니다.
+이 기계어는 Step 18에서 따로 컴파일한 진짜 C 프로그램으로 대체됩니다.
+
+## write와 exit
+
+`syscall_handler` 의 `switch` 에 처음으로 `case` 두 개가 생깁니다.
+`sys_write(fd, buf, len)` 은 `buf` 에서 `len` 바이트를 읽어, fd가 1(표준 출력)이나 2(표준 에러)면 화면에 찍고, 시리얼에는 항상 찍습니다. 커널이 유저의 `buf` 주소를 그대로 읽을 수 있는 것은, 지금 커널과 유저가 같은 페이지 테이블을 쓰고 있고 커널은 유저 페이지에도 접근할 수 있기 때문입니다. 이 구현은 그 주소가 정말 유저 영역인지 검사하지 않는데, 진짜 운영체제라면 반드시 해야 하는 일입니다.
+`sys_exit(code)` 는 시리얼에 `[syscall] pid N: exit(code)` 를 남기고, 프로세스 상태를 새로 생긴 `PROC_DEAD` 로 바꾼 뒤 `schedule()` 을 부릅니다. 스케줄러는 DEAD 프로세스를 다시는 고르지 않으므로 `schedule()` 은 돌아오지 않습니다. 그래서 exit는 "돌아오지 않는 시스템 콜"입니다.
+
+## 스케줄러: 죽은 프로세스 건너뛰기
+
+`schedule()` 은 다음 프로세스를 고를 때 상태가 `PROC_DEAD` 인 것을 건너뜁니다. 또 지금 프로세스가 DEAD라면 READY로 되돌리지 않습니다.
+DEAD 프로세스의 PCB와 스택은 아직 해제되지 않고 큐에 그대로 남습니다. 스스로를 해제할 수 없는 이유가 있는데(지금 그 스택 위에서 돌고 있으니까요), 이 문제는 Step 22에서 부모가 자식을 회수하는 "좀비" 개념으로 해결합니다.
+
+## Step 12의 구멍 메우기
+
+이 상태로 실행하면 ring 3에 내려가자마자 첫 명령에서 페이지 폴트가 납니다. 메시지는 `protection read user`, 에러 코드 `0x5` 입니다. 매핑은 있는데 유저 권한이 없다는 뜻입니다.
+Step 12에서 예고한 문제입니다. 16GB 주소의 PML4 인덱스는 0이고, PML4[0]은 boot.s가 U/S 없이 만들어 둔 엔트리입니다. 그래서 `vmm_map_page` 에 한 가지를 덧붙입니다. 중간 엔트리가 **이미 있으면**, 요청한 플래그에 `VMM_USER` 가 있을 때 기존 엔트리에도 `|= VMM_USER` 로 비트를 켭니다.
+이렇게 하면 PML4[0]에도 U/S가 켜집니다. "그럼 커널 영역인 0~1GB도 유저에게 열리는 것 아닌가?" 하는 걱정이 들 수 있는데, 그렇지 않습니다. U/S는 네 단계를 모두 AND하므로, 그 아래 PD의 2MB 페이지 엔트리들에 U/S가 꺼져 있는 한 0~1GB는 여전히 커널 전용입니다.
+
+## 이 단계가 뒤에 남기는 것
+
+`jump_to_usermode(rip, rsp)` 는 커널에서 유저로 가는 유일한 길이 됩니다. `process_create_user` 와 `user_proc_trampoline` 은 "유저 프로그램을 프로세스로 띄우는" 표준 방법이 되어, Step 18과 Step 23에서 그대로 쓰입니다.
+`SYS_WRITE`(1)와 `SYS_EXIT`(60)가 첫 시스템 콜입니다. write는 Step 19에서 파일 디스크립터 기반으로 다시 작성되고, exit는 Step 22에서 열린 파일을 닫고 종료 코드를 남기도록 확장됩니다.
+`PROC_DEAD` 상태와 "스케줄러가 DEAD를 건너뛴다"는 규칙은 Step 22의 좀비 회수로 이어집니다.
+
+## 직접 만들어 보기
+
+이 단계는 작게 나눠서 확인하는 것이 특히 중요합니다.
+먼저 `jump_to_usermode` 만 만들고, 유저 코드는 Step 12의 `hlt` 한 바이트 그대로 둔 채 커널에서 직접 불러 보세요. `hlt` 는 특권 명령이라 ring 3에서 실행하면 General Protection이 납니다. 이 패닉이 **성공의 신호** 입니다. 패닉 메시지의 `cs` 가 `0x1b` 라면 ring 3에 도착했다는 확실한 증거입니다. 이 시점에는 위에서 설명한 U/S 문제로 #GP 대신 페이지 폴트가 먼저 날 텐데, 그 메시지를 보고 `vmm.c` 를 고치는 것까지가 첫 번째 과제입니다.
+다음으로 기계어를 `int 0x80` 두 바이트(`0xcd, 0x80`)로 바꾸고 `syscall_handler` 에서 무언가 출력되는지 확인합니다. 그다음 write와 exit를 구현하고 기계어를 완성합니다.
+마지막으로 커널에서 직접 부르던 것을 `process_create_user` 로 프로세스화해서 셸과 동시에 돌게 합니다.
+
+## 확인하기
+
+부팅 후 화면과 터미널에 `Hello from ring 3!` 가 나오고, 터미널에는 이어서 `[syscall] pid N: exit(0)` 가 찍힙니다. 셸 프롬프트는 평소처럼 나오고 명령도 정상 동작합니다. 출력 순서는 스케줄링에 따라 셸의 시작 메시지와 섞일 수 있습니다.
+QEMU 모니터(`Ctrl+Alt+2`)에서 `info registers` 를 여러 번 찍어 보면, 아주 짧은 순간이라 보기 어렵지만 `CS=001b` 인 순간을 잡을 수도 있습니다.
+
+## 막혔을 때
+
+`iretq` 에서 General Protection이 난다면 셀렉터의 RPL이 3이 아니거나(`0x18` 대신 `0x1B` 를 써야 함), GDT의 유저 디스크립터 DPL이 틀린 것입니다.
+ring 3의 첫 명령에서 페이지 폴트 `err=0x5`(protection, read, user)가 난다면 상위 엔트리의 U/S 비트가 빠진 것으로, 이 단계의 `vmm.c` 보완을 확인하세요.
+`int 0x80` 에서 General Protection이 난다면 0x80 게이트의 DPL이 0입니다. Step 11의 `idt_set_user_gate` 를 쓰고 있는지 보세요.
+유저 코드가 돌다 첫 타이머 인터럽트에서 커널이 죽는다면 TSS.rsp0가 설정되지 않았거나 `ltr` 이 실행되지 않은 것입니다.
+문자열이 깨져서 나온다면 `lea` 의 상대 오프셋을 다시 계산해 보세요.
 
 ## 다음 단계로
 
-ring 3은 되지만, 프로그램이 커널 소스 안의 바이트 배열이다. 진짜 프로그램은 **디스크**에서 읽어 와야 한다.
-디스크에 가려면 먼저 어떤 장치가 붙어 있는지부터 알아본다 → [Step 15](step15-pci.md)
+ring 3 프로그램이 돌기는 하지만, 그 프로그램은 커널 소스 안의 바이트 배열입니다. 프로그램을 하나 바꾸려면 커널을 다시 빌드해야 합니다. 진짜 운영체제는 프로그램을 **디스크** 에서 읽어 옵니다.
+Part 3에서는 디스크에 가는 길을 만듭니다. 그 첫걸음으로, 이 컴퓨터에 어떤 장치가 붙어 있는지부터 알아봅니다 → [Step 15](step15-pci.md)

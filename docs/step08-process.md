@@ -1,72 +1,148 @@
 # Step 08 — 프로세스 & 컨텍스트 스위칭 (선점형 라운드 로빈)
 
-> 프로세스마다 커널 스택을 주고, 저장된 스택 포인터(rsp)만 바꿔 끼우는 `swtch` 로 실행 흐름을 전환한다. 타이머가 100ms마다 강제로 넘긴다.
+지금까지 커널에는 실행 흐름이 하나뿐이었습니다. `kernel_main` 이 위에서부터 차례로 실행되다 마지막 루프에서 키보드 입력을 기다리는 것이 전부입니다.
+운영체제의 핵심 능력 중 하나는 CPU가 하나뿐이어도 여러 프로그램이 **동시에** 도는 것처럼 보이게 하는 것입니다. 실제로는 아주 짧은 시간씩 번갈아 실행할 뿐인데, 그 전환이 충분히 빠르고 매끄러우면 사람 눈에는 동시에 도는 것처럼 보입니다.
+이번 단계에서는 그 전환 장치를 만듭니다. 각 실행 흐름(프로세스)에 자기만의 스택을 주고, 지금 흐름의 상태를 저장한 뒤 다른 흐름의 상태로 갈아 끼우는 `swtch` 를 만들고, Step 03의 타이머가 100ms마다 강제로 이 전환을 일으키게 합니다.
+결과는 단순합니다. 둘 다 무한 루프인 두 함수 `thread_a` 와 `thread_b` 가 화면에 `AAAA…BBBB…AAAA…` 처럼 번갈아 글자를 찍습니다. 어느 쪽도 양보하는 코드가 없는데도 말입니다.
 
-## 목표
+새 파일은 `proc/process.h`·`process.c`, `proc/swtch.s`, `proc/scheduler.c`·`scheduler.h` 입니다. `kernel/timer.c` 가 10틱마다 `schedule()` 을 부르게 바뀌고, `kernel/main.c` 에서 두 스레드를 만들어 등록합니다.
+`process.h` → `swtch.s` → `process.c` → `scheduler.c` → `timer.c` 순서로 읽으세요. 이 단계는 그림을 그려 가며 읽어야 이해되는 부분이 있으니 종이를 옆에 두는 것을 권합니다.
 
-두 커널 스레드가 `AAAA…BBBB…AAAA…` 처럼 번갈아 출력한다. 둘 다 무한 루프인데도.
+## 프로세스 = 스택 하나 + 정보 구조체 하나
 
-## 이 단계가 만드는 틀
+```c
+typedef struct process {
+    uint64_t       rsp;    /* 저장된 스택 포인터 */
+    uint64_t      *pml4;   /* 페이지 테이블 */
+    void          *stack;  /* 스택 베이스 (해제용) */
+    proc_state_t   state;  /* READY / RUNNING */
+    int            pid;
+    struct process *next;  /* 스케줄러 원형 큐 */
+    void         (*entry)(void);
+} process_t;
+```
 
-- **PCB `process_t`** — 프로세스의 모든 것을 담는 구조체. 이후 단계마다 필드가 늘어난다:
-  `user_rip/user_rsp`(14), `fd_table`(19), `saved_regs`(20), `exit_code`(22)
-- **`swtch(&prev->rsp, next->rsp)`** — 모든 전환의 유일한 통로. 이후 바뀌지 않는다
-- **"가짜 초기 스택 프레임" 기법** — 아직 한 번도 실행 안 된 프로세스를, 이미 `swtch` 하다 멈춘 것처럼 꾸민다.
-  Step 14(ring 3 진입), Step 20(fork 자식 복귀)이 **같은 기법**으로 진입점만 바꿔 쓴다
-- **원형 큐 스케줄러** — `scheduler_add` / `schedule` / `current_process`. Step 14에서 DEAD 건너뛰기, Step 22에서 CR3 교체가 추가된다
-- **idle 프로세스(pid 0)** = 부팅한 그 흐름 자체
+이 구조체를 PCB(Process Control Block)라고 부릅니다. 지금은 필드가 몇 개 없지만, 앞으로 단계마다 하나씩 늘어나 이 커널에서 가장 많이 자라는 구조체가 됩니다. Step 14에서 유저 모드 진입점, Step 19에서 열린 파일 목록, Step 20에서 fork용 레지스터 프레임, Step 22에서 종료 코드가 추가됩니다.
+가장 중요한 필드는 `rsp` 하나입니다. 잠시 멈춘 프로세스의 상태는 전부 그 프로세스의 스택에 쌓여 있고, PCB는 그 스택의 꼭대기가 어디인지만 기억합니다. `pml4` 는 지금은 모두 같은 커널 PML4를 가리키지만, Step 20부터 프로세스마다 달라집니다.
 
-## 만들 파일
+## swtch: 스택 포인터만 바꿔 끼우기
 
-| 파일 | 역할 |
-|---|---|
-| `proc/process.h` | `process_t` (rsp, pml4, stack, state, pid, next, entry) |
-| `proc/swtch.s` | callee-saved 6개 push → rsp 저장/교체 → pop → `ret` |
-| `proc/process.c` | `process_create`(8KB 스택 + 초기 프레임), `process_create_idle`, `proc_trampoline` |
-| `proc/scheduler.c` | 원형 큐, `schedule()` |
-| `kernel/timer.c` | 10틱(100ms)마다 `schedule()` |
-| `kernel/main.c` | thread_a / thread_b 생성 후 `schedule()` |
+실행 흐름을 바꾼다는 것은 CPU의 레지스터를 통째로 다른 흐름의 것으로 바꾼다는 뜻입니다. 레지스터가 16개가 넘는데 그걸 다 저장해야 할까요?
+여기서 Step 01부터 등장한 **호출 규약** 이 결정적인 역할을 합니다. System V AMD64 규약에서 함수를 부르는 쪽은 `rbx, rbp, r12, r13, r14, r15` 여섯 개만 "함수가 돌아온 뒤에도 그대로일 것"이라고 기대합니다. 나머지 레지스터는 함수가 마음대로 바꿔도 되고, 부르는 쪽이 필요하면 미리 알아서 저장해 둡니다.
+`swtch` 를 평범한 C 함수처럼 부르기만 하면, 컴파일러는 호출 전에 필요한 다른 레지스터를 이미 스택에 저장해 둡니다. 그러니 `swtch` 는 이 여섯 개와 스택 포인터만 저장하면 됩니다.
 
-읽는 순서: `proc/process.h` → `proc/swtch.s` → `proc/process.c` → `proc/scheduler.c` → `kernel/timer.c`
+```asm
+swtch:                      /* rdi = &prev->rsp, rsi = next->rsp */
+    pushq %rbp
+    pushq %rbx
+    pushq %r12
+    pushq %r13
+    pushq %r14
+    pushq %r15
+    movq %rsp, (%rdi)       /* prev->rsp = 지금 rsp */
+    movq %rsi, %rsp         /* rsp = next->rsp   ← 여기서 세상이 바뀐다 */
+    popq %r15
+    popq %r14
+    popq %r13
+    popq %r12
+    popq %rbx
+    popq %rbp
+    ret
+```
 
-## 핵심 개념
+앞부분은 지금 프로세스의 스택에 여섯 레지스터를 쌓고, 그 스택 꼭대기를 `prev->rsp` 에 적습니다. 그리고 `rsp` 를 다음 프로세스의 저장된 값으로 바꿉니다. 이 한 줄 이후의 모든 명령은 **다른 프로세스의 스택** 위에서 실행됩니다.
+뒷부분은 그 스택에서 여섯 레지스터를 꺼내고 `ret` 합니다. `ret` 은 스택 꼭대기의 주소로 점프하는 명령인데, 이 스택은 다음 프로세스가 예전에 `swtch` 를 불렀을 때 쌓인 것이므로, 꺼낸 주소는 그 프로세스가 `swtch` 를 불렀던 바로 다음 줄입니다. 그 프로세스 입장에서는 `swtch` 라는 함수를 불렀다가 한참 뒤에 돌아온 것과 똑같습니다.
+이 `swtch` 는 최종 코드까지 한 줄도 바뀌지 않는, 모든 프로세스 전환의 유일한 통로입니다.
 
-- **왜 rsp만 바꾸면 되나?** C 함수 호출 규약상 함수를 부르는 쪽은 rbx, rbp, r12~r15만 "보존된다"고 기대한다(callee-saved).
-  `swtch` 는 함수처럼 불리므로 이 6개 + rsp만 저장하면, 나머지는 호출한 쪽이 이미 알아서 저장해 둔 상태다
-- **swtch의 흐름**
-  ```
-  push rbp,rbx,r12..r15   (현재 프로세스 스택에)
-  prev->rsp = rsp
-  rsp = next->rsp         ← 여기서 세상이 바뀜
-  pop r15..r12,rbx,rbp    (다음 프로세스 스택에서)
-  ret                     ← 다음 프로세스가 swtch를 불렀던 곳으로 복귀
-  ```
-- **새 프로세스의 초기 스택**: `[proc_trampoline 주소][0 ×6]` 을 쌓아 두면, 첫 `swtch` 의 pop 6번 + `ret` 이 trampoline으로 들어간다
-- **trampoline의 `sti`**: 전환은 타이머 인터럽트 안에서 일어난다(IF=0). 원래 흐름은 `iretq` 로 돌아가며 IF가 복원되지만,
-  새 프로세스는 `ret` 으로 시작하므로 직접 인터럽트를 켜야 다음 타이머가 온다
-- **EOI를 먼저 보내는 이유** (Step 03): 타이머 핸들러 안에서 `schedule()` 로 다른 프로세스로 가 버리면 핸들러가 한참 뒤에야 끝난다. EOI가 그 뒤에 있으면 그 동안 타이머가 멈춘다
+## 처음 실행되는 프로세스를 속이는 법
 
-## 직접 만든다면
+그런데 새로 만든 프로세스는 아직 한 번도 `swtch` 를 부른 적이 없습니다. 스택이 텅 비어 있으니, 첫 전환에서 `swtch` 가 여섯 개를 꺼내고 `ret` 할 내용이 없습니다.
+해결책은 **이미 `swtch` 를 부르다 멈춘 것처럼 스택을 꾸며 두는 것** 입니다.
 
-1. PCB + `swtch.s` 작성
-2. 협력형부터: 스레드가 직접 `schedule()` 을 부르는 버전으로 A/B 교대 확인
-3. `proc_trampoline` + 초기 프레임 만들기 — 여기가 핵심, 그림을 그려 가며
-4. idle 프로세스 등록, 원형 큐 연결
-5. 타이머에서 `schedule()` 호출 → 선점형으로 전환, `sti` 없이 돌려서 멈추는 것도 관찰
+```c
+uint64_t *sp = (uint64_t *)(stk + STACK_SIZE);   /* 스택 꼭대기 */
+*--sp = (uint64_t)proc_trampoline;               /* ret 이 점프할 곳 */
+*--sp = 0;  /* rbp */
+*--sp = 0;  /* rbx */
+*--sp = 0;  /* r12 */
+*--sp = 0;  /* r13 */
+*--sp = 0;  /* r14 */
+*--sp = 0;  /* r15 */
+p->rsp = (uint64_t)sp;
+```
 
-## 확인
+`process_create` 는 힙에서 8KB 스택을 받아, 꼭대기부터 `proc_trampoline` 의 주소 하나와 0 여섯 개를 쌓습니다. 첫 전환에서 `swtch` 는 아무것도 모른 채 0 여섯 개를 레지스터로 꺼내고, `ret` 으로 `proc_trampoline` 에 들어갑니다. 넣는 순서가 `swtch` 가 꺼내는 순서의 정반대라는 점에 주의하세요.
+이 "가짜 초기 프레임" 기법은 이 커널에서 가장 중요한 요령 중 하나입니다. Step 14는 같은 방법으로 진입점만 `user_proc_trampoline` 으로 바꿔 유저 모드로 내려가는 프로세스를 만들고, Step 20의 fork는 진입점을 `fork_return` 으로 바꿔 자식 프로세스를 만듭니다.
 
-- A와 B가 덩어리로 번갈아 출력
-- 생각해 볼 것: `proc_trampoline` 의 `sti` 를 지우면? (첫 전환 후 타이머가 안 와서 한 스레드만 계속 돈다)
+`proc_trampoline` 은 두 줄입니다.
 
-## 자주 막히는 곳
+```c
+static void proc_trampoline(void) {
+    __asm__ volatile("sti");
+    current_process()->entry();
+}
+```
 
-| 증상 | 원인 |
-|---|---|
-| 첫 전환에서 General Protection / 이상한 rip | 초기 프레임의 push 순서가 swtch의 pop 순서와 안 맞음 |
-| A만 계속 출력 | trampoline의 `sti` 누락, 또는 EOI가 schedule 뒤에 있음 |
-| 몇 번 돌다 랜덤하게 죽음 | 스택 8KB 넘게 씀 (큰 지역 배열) → 다른 힙 블록 덮어씀 |
+`sti` 가 왜 필요할까요? 프로세스 전환은 대부분 타이머 인터럽트 핸들러 안에서 일어나고, 그때 CPU의 인터럽트 플래그는 꺼져 있습니다(Step 02의 인터럽트 게이트). 원래 돌던 프로세스는 나중에 핸들러가 끝날 때 `iretq` 가 플래그를 복원해 주지만, 새 프로세스는 `ret` 으로 시작하므로 플래그가 꺼진 채로 출발합니다. 직접 켜 주지 않으면 다음 타이머 인터럽트가 영영 오지 않아, 이 프로세스가 CPU를 독차지합니다.
+
+## 스케줄러: 원형 큐 돌기
+
+스케줄러는 프로세스들을 `next` 포인터로 동그랗게 이은 **원형 큐** 를 관리합니다. `current` 는 지금 실행 중인 프로세스이고, `schedule()` 은 그 다음 프로세스로 넘어갑니다.
+
+```c
+void schedule(void) {
+    process_t *prev = current;
+    process_t *next = current->next;
+    if (prev == next) return;
+    prev->state = PROC_READY;
+    current     = next;
+    next->state = PROC_RUNNING;
+    swtch(&prev->rsp, next->rsp);
+}
+```
+
+모두에게 차례대로 같은 시간을 주는 이 방식을 **라운드 로빈** 이라고 합니다. `swtch` 를 부른 뒤의 줄은 "나중에 다시 이 프로세스 차례가 돌아왔을 때" 실행된다는 점이 처음에는 낯섭니다. `schedule()` 이라는 함수 호출 하나가 돌아오기까지 그 사이에 다른 프로세스들이 한참 돌다 오는 것입니다.
+
+처음 부팅한 흐름, 즉 지금 `kernel_main` 을 실행하고 있는 이 흐름도 하나의 프로세스로 등록해야 합니다. 그렇지 않으면 `swtch` 가 지금 상태를 저장할 곳이 없습니다. `process_create_idle()` 은 스택을 새로 만들지 않고 PCB만 만들어, 지금 흐름에 pid 0을 붙입니다. 이 프로세스가 **idle 프로세스** 가 되고, 처음 `swtch` 할 때 그 `rsp` 가 채워집니다.
+`kernel_main` 은 idle로 스케줄러를 초기화하고, 두 스레드를 등록한 뒤 `schedule()` 을 한 번 불러 첫 전환을 일으킵니다. 그 뒤로 idle 프로세스는 `sti; hlt` 루프에서 차례가 올 때마다 잠깐 깨었다 다시 잡니다.
+
+## 선점: 타이머가 강제로 넘긴다
+
+여기까지만 있으면 프로세스가 스스로 `schedule()` 을 불러야만 전환이 일어납니다. 이것을 협력형 멀티태스킹이라고 하는데, 무한 루프 하나가 양보하지 않으면 시스템 전체가 멈춥니다.
+마지막 조각은 Step 03의 타이머 핸들러입니다. 10틱(100ms)마다 `schedule()` 을 부르도록 바꾸면, 프로세스가 무엇을 하고 있든 100ms가 지나면 타이머 인터럽트가 끼어들어 다음 프로세스로 넘깁니다. 이것이 **선점형** 멀티태스킹입니다.
+이때 흐름을 따라가 보면 이렇습니다. `thread_a` 가 루프를 돌다 타이머 인터럽트가 걸리면, CPU가 `thread_a` 의 스택에 인터럽트 프레임을 쌓고 `irq_common` 이 레지스터를 모두 저장합니다. `timer_handler` 가 `schedule()` 을 부르면 `swtch` 가 그 위에 여섯 개를 더 쌓고 `thread_b` 로 넘어갑니다. 나중에 `thread_a` 차례가 다시 오면 `swtch` 가 돌아오고, `schedule` 과 `timer_handler` 가 차례로 끝나고, `irq_common` 이 레지스터를 복원하고, `iretq` 가 루프 한가운데로 돌려보냅니다. `thread_a` 는 자기가 멈췄었다는 사실조차 모릅니다.
+Step 03에서 **EOI를 핸들러 전에** 보내도록 해 둔 것이 여기서 효과를 냅니다. `timer_handler` 는 `thread_a` 의 차례가 다시 올 때까지 끝나지 않는데, EOI가 그 뒤에 있었다면 그동안 타이머가 멈춰 `thread_b` 가 CPU를 독차지했을 것입니다.
+
+## 이 단계가 뒤에 남기는 것
+
+PCB `process_t` 는 이후 단계마다 필드가 늘어나는 커널의 중심 구조체가 됩니다. `swtch` 는 바뀌지 않는 전환의 통로이고, "가짜 초기 프레임" 기법은 Step 14와 Step 20에서 진입점만 바꿔 재사용됩니다.
+`scheduler_add`, `schedule`, `current_process` 는 스케줄러의 기본 API로 계속 쓰이며, Step 14에서 종료된 프로세스를 건너뛰는 기능이, Step 22에서 프로세스마다 페이지 테이블(CR3)과 커널 스택(TSS.rsp0)을 바꿔 끼우는 기능이 `schedule()` 에 추가됩니다.
+idle 프로세스(pid 0)는 "할 일이 없을 때 CPU가 머무는 곳"으로 끝까지 남습니다.
+
+## 직접 만들어 보기
+
+먼저 PCB와 `swtch.s` 를 만들고, 협력형부터 시작하세요. 두 스레드가 글자 하나를 찍을 때마다 직접 `schedule()` 을 부르게 하면 타이머 없이도 `ABABAB` 가 나옵니다. 인터럽트가 끼지 않으니 흐름을 따라가기 쉽습니다.
+그다음 `proc_trampoline` 과 초기 프레임을 만드는 부분을 종이에 그려 가며 작성합니다. 스택의 각 칸에 무엇이 있고 `swtch` 가 어떤 순서로 꺼내는지 그려 보면 이 단계의 절반은 이해한 것입니다.
+마지막으로 스레드 안의 `schedule()` 호출을 지우고 타이머 핸들러에서 부르게 바꿉니다. 그때 `proc_trampoline` 의 `sti` 를 일부러 지워서 한 스레드만 계속 도는 것도 확인해 보세요.
+
+## 확인하기
+
+부팅 로그 뒤에 `A` 와 `B` 가 덩어리로 번갈아 찍힙니다. 덩어리 하나가 100ms 동안 찍힌 양입니다.
+
+```
+AAAAAAAAAABBBBBBBBBBAAAAAAAAAABBBBBBBBBB...
+```
+
+`busy_wait()` 의 반복 횟수를 바꾸면 덩어리 크기가 달라지지만, 번갈아 나오는 리듬은 그대로입니다.
+
+## 막혔을 때
+
+첫 전환에서 General Protection이나 이상한 `rip` 로 패닉한다면 초기 프레임이 `swtch` 의 pop 순서와 맞지 않는 것입니다. 꼭대기에 trampoline 주소가 있고, 그 아래로 0이 정확히 여섯 개인지 확인하세요.
+`A` 만 계속 나온다면 `proc_trampoline` 의 `sti` 가 빠졌거나, EOI가 `schedule()` 뒤에 있는 것입니다.
+몇 바퀴 돌다 무작위로 죽는다면 8KB 스택을 넘겨 쓴 경우를 의심하세요. 큰 지역 배열을 쓰는 함수가 스택을 넘치면 힙의 다른 블록을 덮어씁니다. 커널 스택은 작다는 사실을 앞으로 계속 기억해야 합니다.
+idle 프로세스로 돌아올 때 이상해진다면 `scheduler_init` 이 idle의 `next` 를 자기 자신으로 초기화했는지 확인하세요.
 
 ## 다음 단계로
 
-여러 흐름을 돌릴 수 있게 됐으니, 그중 하나를 **사람과 대화하는 프로그램**(셸)으로 만든다 → [Step 09](step09-shell.md)
+이제 여러 흐름을 동시에 돌릴 수 있습니다. 그중 하나를 테스트용 무한 루프가 아니라 **사람과 대화하는 프로그램** 으로 바꿔 봅시다.
+다음 단계에서는 키보드로 한 줄을 입력받아 명령을 실행하는 셸을 프로세스로 띄우고, 셸이 다룰 간단한 메모리 파일시스템을 만듭니다 → [Step 09](step09-shell.md)

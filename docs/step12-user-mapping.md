@@ -1,58 +1,106 @@
 # Step 12 — 유저 메모리 매핑 (U/S 비트)
 
-> 유저 코드(16GB)와 유저 스택(20GB) 페이지를 `VMM_USER` 로 매핑한다. 중간 페이지 테이블에도 U/S 비트를 전파하도록 `vmm_map_page` 를 고친다.
+ring 3 코드가 돌려면 세 가지가 필요합니다. ring 3용 세그먼트(Step 10), 커널에 부탁할 문(Step 11), 그리고 **ring 3이 접근할 수 있는 메모리** 입니다. 이번 단계는 마지막 것을 준비합니다.
+지금까지 만든 모든 페이지는 커널 전용입니다. 커널 코드, 힙, 16GB 시험 페이지 모두 그렇습니다. ring 3 코드는 이런 페이지를 읽기만 해도 페이지 폴트가 납니다. 이것은 결함이 아니라 의도된 보호입니다. 유저 프로그램이 커널 메모리를 엿보거나 고칠 수 없어야 하니까요.
+그래서 유저 프로그램이 쓸 페이지는 따로, "유저도 접근해도 된다"는 표시를 달아 매핑해야 합니다. 그 표시가 페이지 테이블 엔트리의 **U/S 비트(bit 2)** 입니다.
+이번 단계에서는 유저 코드용 페이지(16GB)와 유저 스택용 페이지(20GB)를 U/S 비트를 켜서 매핑하고, `vmm_map_page` 가 이 비트를 중간 테이블에도 전파하도록 고칩니다. 아직 ring 3으로 내려가지는 않습니다. 매핑 결과가 로그로 나오고, 나머지는 이전과 똑같이 동작합니다.
 
-## 목표
+바뀌는 파일은 `mm/vmm.c` 이고, 새 파일은 `kernel/usermode.c`·`usermode.h` 입니다. `kernel/main.c` 는 Step 11의 시험용 `int $0x80` 을 지우고 `usermode_setup()` 을 부릅니다.
+`mm/vmm.c` 의 `parent_flags` → `kernel/usermode.h` → `kernel/usermode.c` 순서로 읽으세요.
 
-`[user] code mapped: virt=0x400000000 ...`, `[user] stack mapped: virt=0x500000000 ...` 로그. (아직 ring 3으로 내려가지는 않음 — 다음 단계 준비)
+## U/S 비트는 모든 단계가 허락해야 한다
 
-## 이 단계가 만드는 틀
+U/S 비트가 1이면 ring 3도 접근할 수 있고, 0이면 ring 0만 접근할 수 있습니다. 커널은 U/S 비트와 상관없이 어디든 접근할 수 있습니다.
+여기서 놓치기 쉬운 규칙이 하나 있습니다. CPU는 주소를 변환하면서 PML4, PDPT, PD, PT 네 단계의 엔트리를 모두 읽는데, 유저 접근을 허락하려면 **네 단계 모두** U/S 비트가 1이어야 합니다. 마지막 PT 엔트리만 1이고 위 단계 중 하나라도 0이면 접근이 막힙니다. 쓰기 권한(R/W 비트)도 같은 방식으로 모든 단계를 AND합니다.
+이렇게 설계된 이유는 상위 엔트리 하나로 넓은 영역을 한꺼번에 보호할 수 있게 하기 위해서입니다. 예를 들어 PML4 엔트리 하나의 U/S를 0으로 두면, 그 아래 512GB 전체가 유저에게서 차단됩니다.
 
-- **유저 주소 배치 약속**
-  | 주소 | 용도 |
-  |---|---|
-  | `0x0` ~ `0x40000000` (1GB) | 커널 (아이덴티티, 유저 접근 불가) |
-  | `0x300000000` (12GB) | 커널 힙 |
-  | `0x400000000` (16GB) | **유저 코드** — Step 18부터 ELF도 여기 링크 (`user/linker.ld`) |
-  | `0x500000000` (20GB) | 유저 스택 (Step 14 데모) |
-- **"유저 페이지 = U/S=1인 4KB 페이지"** 라는 구분 — Step 20 `vmm_fork` 는 이 비트로 "복사할 페이지"를, Step 21 `vmm_free_user` 는 "지울 페이지"를 고른다
-- **`usermode.h`** — 유저 관련 상수의 집합소. Step 14에서 `USER_CS` · `USER_DS` 가 추가된다
+Step 06의 `vmm_map_page` 는 중간 테이블을 새로 만들 때 항상 `VMM_PRESENT | VMM_WRITABLE` 만 넣었습니다. 그래서 맨 끝 PT 엔트리에 `VMM_USER` 를 줘도 위 단계가 막고 있었습니다.
+이번 단계에서 이 부분을 고칩니다.
 
-## 만들 파일
+```c
+uint64_t parent_flags = VMM_PRESENT | VMM_WRITABLE | (flags & VMM_USER);
+...
+pml4[pml4i] = (uint64_t)pdpt | parent_flags;
+...
+pdpt[pdpti] = (uint64_t)pd | parent_flags;
+...
+pd[pdi] = (uint64_t)pt | parent_flags;
+```
 
-| 파일 | 역할 |
-|---|---|
-| `mm/vmm.c` | 새로 만드는 중간 테이블 엔트리에 `flags & VMM_USER` 전파 (`parent_flags`) |
-| `kernel/usermode.c` | `usermode_setup` — 코드 · 스택 페이지 할당 후 USER로 매핑, 코드 자리에 `hlt` 한 바이트 |
-| `kernel/usermode.h` | `USER_CODE_VIRT`, `USER_STACK_VIRT` |
-| `kernel/main.c` | `usermode_setup()` (int 0x80 테스트는 제거) |
+요청한 플래그에 `VMM_USER` 가 있으면 새로 만드는 중간 테이블 엔트리에도 `VMM_USER` 를 넣습니다. 중간 엔트리는 항상 쓰기 가능으로 두고, 실제 쓰기 권한은 마지막 PT 엔트리에서 정합니다.
+커널 페이지(힙 등)를 매핑할 때는 `flags` 에 `VMM_USER` 가 없으니 이전과 똑같이 동작합니다.
 
-원본 커밋: `d93c252` · 읽는 순서: `mm/vmm.c`(parent_flags) → `kernel/usermode.c`
+## 유저 주소 배치
 
-## 핵심 개념
+`usermode.h` 는 유저 공간의 주소와 Step 10에서 이야기한 셀렉터 값을 정의합니다.
 
-- **U/S 비트(bit 2)**: 1이면 ring 3도 접근 가능, 0이면 커널만. 커널은 어디든 접근 가능
-- **모든 레벨이 허락해야 한다** — CPU는 PML4 → PDPT → PD → PT 엔트리의 U/S를 **전부 AND** 한다. 마지막 PT만 USER여도 위 단계 하나가 0이면 유저 접근은 #PF
-- **이 단계의 한계** (Step 14에서 드러남): 새로 만드는 중간 테이블은 USER가 되지만, **이미 있던** 엔트리는 그대로다.
-  16GB 주소의 PML4 인덱스는 0 — boot.s가 U/S 없이 만든 바로 그 엔트리를 공유한다
+```c
+#define USER_CS 0x1B  /* GDT 0x18(유저코드) | RPL=3 */
+#define USER_DS 0x23  /* GDT 0x20(유저데이터) | RPL=3 */
 
-## 직접 만든다면
+#define USER_CODE_VIRT  0x400000000UL   /* 16GB */
+#define USER_STACK_VIRT 0x500000000UL   /* 20GB */
+```
 
-1. `usermode_setup` 에서 페이지 두 장을 `VMM_USER` 로 매핑
-2. `vmm_map_page` 의 중간 엔트리 플래그를 `parent_flags` 로
-3. 매핑 결과를 페이지 테이블을 따라가며 출력해 각 레벨의 bit 2 확인
+이로써 이 커널의 가상 주소 지도가 완성됩니다. 0~1GB는 커널(아이덴티티 매핑, 유저 접근 불가), 12GB는 커널 힙, 16GB는 유저 코드, 20GB는 이번 단계와 Step 14에서 쓰는 유저 스택입니다.
+16GB라는 주소는 끝까지 유지됩니다. Step 18에서 따로 컴파일한 유저 프로그램을 실행할 때도, 그 프로그램은 링커 스크립트로 `0x400000000` 에 배치되도록 빌드됩니다. 유저 스택은 Step 18부터 다른 위치(`0x7FF00000` 근처)로 옮겨집니다.
 
-## 확인
+## usermode_setup: 유저 페이지 두 장
 
-- 두 줄의 `[user] ... mapped` 로그, 셸 정상 동작
+```c
+static const uint8_t user_program[] = {
+    0xf4  /* hlt — 일단 멈춤 */
+};
 
-## 자주 막히는 곳
+void usermode_setup(void) {
+    uint64_t *pml4 = vmm_get_pml4();
+    void *code_phys = pmm_alloc_page();
+    vmm_map_page(pml4, USER_CODE_VIRT, (uint64_t)code_phys,
+                 VMM_PRESENT | VMM_WRITABLE | VMM_USER);
+    memcpy((void *)USER_CODE_VIRT, user_program, sizeof(user_program));
+    ... 스택 페이지도 같은 방법으로 ...
+}
+```
 
-| 증상 | 원인 |
-|---|---|
-| 커널이 유저 페이지에 쓸 때 Page Fault | WRITABLE 누락 (U/S와 별개) |
-| ring 3에서 접근 시 `err=0x5`/`0x7` (protection, user) | 어느 레벨의 U/S가 0 → Step 14의 보완 참고 |
+PMM에서 프레임을 받아 16GB에 유저 페이지로 매핑하고, 그 자리에 "유저 프로그램"을 복사합니다. 지금 프로그램은 `hlt` 명령 하나(`0xf4`)뿐입니다. 아직 실행하지 않으니 내용은 중요하지 않습니다. Step 14에서 이 배열이 시스템 콜을 부르는 진짜 기계어로 바뀝니다.
+`memcpy` 로 `USER_CODE_VIRT` 에 직접 쓸 수 있는 것은 지금 코드가 커널(ring 0)이기 때문입니다. 커널은 U/S 비트와 상관없이 접근할 수 있고, 매핑을 막 했으니 이 주소가 유효합니다. 이제 Step 01-4에서 만들어 둔 `memcpy` 가 처음으로 실제로 쓰입니다.
+스택 페이지도 같은 방법으로 20GB에 매핑합니다. 두 페이지의 가상 주소와 물리 주소를 로그로 남깁니다.
+
+## 숨어 있는 함정: 이미 있던 엔트리
+
+이번 단계의 `vmm_map_page` 수정에는 일부러 남겨 둔 구멍이 있습니다. 중간 테이블을 **새로 만들 때만** `VMM_USER` 를 넣고, **이미 있던** 엔트리는 그대로 둔다는 점입니다.
+16GB(`0x400000000`)의 인덱스를 계산해 보면, PML4 인덱스는 0입니다. 16GB는 512GB보다 작으니 당연합니다. 그런데 PML4[0]은 Step 01-3의 `boot.s` 가 1GB 아이덴티티 매핑을 위해 이미 만들어 둔 엔트리이고, 그때 넣은 플래그는 `0x3`(Present | Writable)뿐이었습니다. PDPT도 boot.s가 만든 그 테이블입니다.
+결과적으로 PDPT[16] 아래로는 U/S가 켜진 새 테이블이 생기지만, 맨 위 PML4[0]이 U/S=0이라 유저 접근은 여전히 막힙니다. 지금은 아무도 ring 3에서 접근하지 않으니 드러나지 않을 뿐입니다.
+이 문제는 Step 14에서 처음으로 ring 3에 내려갔을 때 페이지 폴트로 드러나고, 그때 "이미 있는 엔트리에도 `VMM_USER` 를 OR 한다"는 보완이 추가됩니다. 이런 구멍을 미리 알고 있으면 Step 14의 에러 메시지를 보는 순간 원인을 짐작할 수 있습니다.
+
+## 이 단계가 뒤에 남기는 것
+
+"유저 페이지 = U/S 비트가 켜진 4KB 페이지"라는 구분이 생겼습니다. 이 구분은 나중에 중요한 판단 기준이 됩니다. Step 20의 `vmm_fork` 는 이 비트를 보고 "자식에게 복사해 줄 페이지"를 고르고, Step 21의 `vmm_free_user` 는 이 비트를 보고 "새 프로그램을 올리기 전에 지울 페이지"를 고릅니다.
+16GB 유저 코드 주소와 `USER_CS`/`USER_DS` 셀렉터가 `usermode.h` 에 모였습니다. 유저 모드와 관련된 상수는 앞으로도 이 파일에 모입니다.
+
+## 직접 만들어 보기
+
+`usermode_setup` 에서 페이지 두 장을 `VMM_USER` 로 매핑하는 것부터 시작하세요. 그다음 `vmm_map_page` 의 중간 엔트리 플래그를 `parent_flags` 로 바꿉니다.
+매핑 결과를 확인하는 함수를 직접 하나 만들어 보면 이 단계를 훨씬 깊이 이해할 수 있습니다. 가상 주소 하나를 받아 PML4 → PDPT → PD → PT를 따라가며 각 단계 엔트리의 bit 2를 출력하는 함수입니다. 16GB 주소로 돌려 보면 PML4 단계만 0으로 나오는 것을 직접 확인할 수 있고, 그게 Step 14에서 고칠 문제입니다.
+
+## 확인하기
+
+부팅 로그에 다음 두 줄이 추가됩니다.
+
+```
+[user] code  mapped: virt=0x0000000400000000 phys=0x0000000000xxx000
+[user] stack mapped: virt=0x0000000500000000 phys=0x0000000000yyy000
+```
+
+셸은 이전과 똑같이 동작해야 합니다. Step 11의 `[syscall] rax=66 (unimplemented)` 줄은 더 이상 나오지 않습니다.
+
+## 막혔을 때
+
+커널이 `memcpy` 로 유저 코드 페이지에 쓸 때 페이지 폴트가 난다면 `VMM_WRITABLE` 이 빠진 것입니다. U/S와 R/W는 별개의 비트입니다.
+매핑 로그는 나오는데 셸이 이상해진다면 `parent_flags` 를 고치면서 커널 매핑의 Writable 비트까지 빠뜨렸을 수 있습니다. 힙이 쓰기 불가가 되면 첫 `kmalloc` 에서 문제가 생깁니다.
+Step 14 이후 ring 3에서 `err=0x5`(protection, read, user)나 `err=0x7`(protection, write, user) 페이지 폴트가 난다면, 바로 위에서 설명한 "이미 있던 엔트리" 문제입니다.
 
 ## 다음 단계로
 
-ring 3로 내려가기 전에, 앞으로 늘어날 부팅 로그와 디버그 출력을 정리해 둔다 → [Step 13](step13-bootlog.md)
+ring 3으로 내려갈 재료는 모두 모였습니다. 하지만 ring 3에 진입하는 순간부터는 디버깅이 훨씬 어려워집니다. 커널과 유저를 오가는 흐름을 따라가려면 지금의 `printf` 만으로는 부족합니다.
+다음 단계에서는 잠시 숨을 고르고 로그 도구를 정비합니다. 시리얼 로그에 마이크로초 단위의 타임스탬프를 붙이고, 화면을 어지럽히지 않는 디버그 출력 함수를 만듭니다 → [Step 13](step13-bootlog.md)

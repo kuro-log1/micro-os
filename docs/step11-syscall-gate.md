@@ -1,57 +1,82 @@
 # Step 11 — int 0x80 시스템 콜 게이트
 
-> IDT 0x80번에 ring 3도 부를 수 있는 게이트를 등록하고, `syscall_handler(registers_t*)` 로 받는 틀을 만든다.
+ring 3에서 도는 유저 프로그램은 일부러 무력하게 만들어집니다. 화면 메모리에 직접 쓸 수도, 포트에 접근할 수도, 페이지 테이블을 바꿀 수도 없습니다. 이런 일은 전부 커널에 **부탁** 해야 합니다.
+그 부탁의 통로가 **시스템 콜** 입니다. 유저 프로그램은 레지스터에 "무슨 일을 해 달라"(번호)와 "무엇을 가지고"(인자)를 담아 두고 커널로 들어가는 문을 두드립니다. 커널은 요청을 처리한 뒤 결과를 레지스터에 담아 돌려보냅니다.
+이번 단계에서는 그 문을 엽니다. IDT의 0x80(128)번 칸에 ring 3에서도 부를 수 있는 게이트를 등록하고, 들어온 요청을 C 함수 `syscall_handler(registers_t *r)` 로 받는 틀을 만듭니다. 아직 유저 모드가 없으니 커널 안에서 `int $0x80` 을 직접 실행해 시험합니다.
 
-## 목표
+바뀌는 파일은 `kernel/idt_asm.s`(시스템 콜 스텁), `kernel/idt.c`(사용자용 게이트)이고, 새 파일은 `kernel/syscall.c`·`syscall.h` 입니다. `kernel/main.c` 에서 `syscall_init()` 을 부르고 시험용 `int $0x80` 을 실행합니다.
+`idt_asm.s` 의 `isr128` → `idt.c` 의 `idt_set_user_gate` → `syscall.c` 순서로 읽으세요.
 
-커널 안에서 `rax=0x42; int $0x80` 을 실행하면 `[syscall] rax=66 (unimplemented)` 가 출력된다.
+## 게이트의 DPL: 누가 이 문을 두드릴 수 있나
 
-## 이 단계가 만드는 틀
+Step 02에서 IDT 게이트의 `type_attr` 를 `0x8E` 로 만들면서, 그 안의 DPL 0이 "ring 0 코드만 `int n` 명령으로 이 게이트를 부를 수 있다"는 뜻이라고 했습니다. 이제 그 의미가 중요해집니다.
+CPU는 소프트웨어가 `int n` 을 실행하면 현재 권한(CPL)이 게이트의 DPL보다 낮지 않은지 확인합니다. ring 3 코드가 DPL 0인 게이트를 부르면 일반 보호 예외(#GP)가 납니다. 이 검사가 없다면 유저 프로그램이 `int 14` 를 실행해 가짜 페이지 폴트를 일으키거나, `int 32` 로 타이머 인터럽트를 흉내 낼 수 있을 것입니다. 하드웨어가 일으키는 IRQ나 CPU 예외에는 이 검사가 적용되지 않으니, 예외와 IRQ는 계속 정상적으로 동작합니다.
+그래서 시스템 콜 게이트 하나만 DPL을 3으로 엽니다.
 
-- **시스템 콜 호출 규약** (Linux x86-64와 같은 레지스터 배치)
-  | 레지스터 | 의미 |
-  |---|---|
-  | `rax` | 시스템 콜 번호 / 반환값 |
-  | `rdi`, `rsi`, `rdx` | 인자 1, 2, 3 |
-- **반환값 = `r->rax` 에 쓰기** — 핸들러가 저장된 프레임의 rax를 바꾸면, 스텁이 pop할 때 그 값이 유저의 rax가 된다 (Step 19부터 사용)
-- **`syscall_handler` 의 switch문** — 이후 시스템 콜은 전부 여기에 case 하나씩: write/exit(14) → read/open/close/lseek(19) → fork(20) → exec(21) → wait(22)
+```c
+#define INT_GATE      0x8E  /* Present=1, DPL=0, Type=E */
+#define INT_GATE_USER 0xEE  /* Present=1, DPL=3, Type=E (유저에서 호출 가능) */
+```
 
-## 만들 파일
+`0x8E` 와 `0xEE` 의 차이는 bit 5~6, 즉 DPL 두 비트뿐입니다. Step 10의 GDT에서 `0x9A` 가 `0xFA` 로 바뀐 것과 같은 원리입니다. `idt_set_user_gate(n, fn)` 은 `idt_set_gate` 와 똑같고 타입만 `0xEE` 입니다.
+이렇게 하면 **유저 프로그램이 커널로 들어올 수 있는 문은 0x80 하나뿐** 이 됩니다. 커널을 보호하는 것은 결국 이런 문을 최소한으로 열어 두는 일입니다.
 
-| 파일 | 역할 |
-|---|---|
-| `kernel/idt_asm.s` | `isr128` 스텁 + `syscall_common` (예외/IRQ 스텁과 같은 모양) |
-| `kernel/idt.c` | `idt_set_user_gate` — 타입 `0xEE` (DPL 3) |
-| `kernel/syscall.c` | `syscall_init` (게이트 등록), `syscall_handler` |
-| `kernel/main.c` | `syscall_init()` + 커널 내 `int $0x80` 테스트 |
+## 시스템 콜 스텁
 
-원본 커밋: `394acdb` · 읽는 순서: `kernel/idt_asm.s`(isr128) → `kernel/idt.c` → `kernel/syscall.c`
+`isr128` 과 `syscall_common` 은 Step 02, 03의 스텁을 그대로 복사한 모양입니다. 가짜 에러 코드 0과 번호 128을 쌓고, 범용 레지스터 15개를 쌓은 뒤 `rsp` 를 `registers_t*` 로 넘겨 `syscall_handler` 를 부릅니다. 돌아오면 레지스터를 복원하고 `iretq` 합니다.
+IRQ와 다른 점이 하나 있다면 EOI가 없다는 것입니다. 시스템 콜은 PIC를 거쳐 온 신호가 아니라 프로그램이 스스로 실행한 명령이라, PIC에 알릴 것이 없습니다.
 
-## 핵심 개념
+이 스텁 모양에서 시스템 콜의 결과를 돌려주는 방법이 자연스럽게 나옵니다. C 핸들러가 받은 `r` 은 스택에 저장된 레지스터 값들을 가리키는 포인터입니다. 핸들러가 `r->rax = 결과` 로 그 값을 고치면, 스텁이 `popq %rax` 할 때 고친 값이 레지스터로 들어가고, `iretq` 후 유저 프로그램은 `rax` 에서 결과를 읽게 됩니다. 별도의 반환 경로를 만들 필요가 없습니다.
+Step 19부터 모든 시스템 콜이 이 방법으로 값을 돌려주고, Step 20의 fork는 자식의 복사본에서만 `rax` 를 0으로 바꿔 "부모와 자식이 서로 다른 값을 받는" 효과를 냅니다.
 
-- **게이트의 DPL** — `int n` 명령은 "현재 링 ≤ 게이트 DPL" 일 때만 허용된다. 예외/IRQ 게이트는 DPL 0(`0x8E`)이라 ring 3이 `int 32` 를 하면 #GP.
-  0x80만 DPL 3(`0xEE`)으로 열어 두면 **유저가 들어올 수 있는 문은 이것 하나**가 된다
-- **IRQ와의 차이** — PIC가 아니라 프로그램이 일으킨 인터럽트라 EOI가 필요 없다
-- **왜 `syscall` 명령이 아니라 `int 0x80`?** 기존 IDT 틀을 그대로 쓸 수 있어 단순하다. `syscall`/`sysret` 은 MSR 설정과 별도 진입 코드가 필요 (빠르지만 복잡)
+## 호출 규약
 
-## 직접 만든다면
+시스템 콜 번호와 인자를 어떤 레지스터에 담을지는 운영체제가 정하기 나름인데, 이 커널은 Linux x86-64와 같은 배치를 따릅니다. `rax` 에 시스템 콜 번호를, `rdi`, `rsi`, `rdx` 에 첫째·둘째·셋째 인자를 담고, 결과는 `rax` 로 돌려받습니다.
+번호도 Linux를 따릅니다. Step 14의 write가 1, exit가 60이고, Step 19의 read 0, open 2, close 3, lseek 8, Step 20의 fork 57, Step 21의 exec 59, Step 22의 wait 61이 차례로 추가됩니다. 번호를 맞춰 두면 Linux 자료를 참고하기 편합니다.
+이번 단계의 `syscall_handler` 는 아직 아무 시스템 콜도 처리하지 않고, `rax` 의 값을 출력하고 "구현되지 않음"이라고만 알립니다. 앞으로 이 함수 안의 `switch (r->rax)` 에 `case` 가 하나씩 늘어나는 것이 Part 2~4의 큰 흐름입니다.
 
-1. `idt_set_gate` 를 복사해 타입만 `0xEE` 인 `idt_set_user_gate`
-2. `isr128` 스텁 (`int_no = 128`, 가짜 err_code)
-3. `syscall_handler` 에서 rax 출력
-4. ring 0에서 `int $0x80` 테스트 (ring 3 테스트는 Step 14)
+## 왜 syscall 명령이 아니라 int 0x80인가
 
-## 확인
+x86-64에는 시스템 콜 전용 명령인 `syscall` / `sysret` 이 있고, 실제 Linux도 64비트에서는 이걸 씁니다. 인터럽트 메커니즘을 거치지 않아 훨씬 빠르기 때문입니다.
+하지만 `syscall` 을 쓰려면 여러 MSR에 진입 주소와 세그먼트를 설정해야 하고, 진입 직후에는 스택이 바뀌지 않아 커널 스택으로 직접 갈아타는 코드를 써야 합니다. `int 0x80` 은 이미 만들어 둔 IDT와 스텁, TSS.rsp0 스택 전환을 그대로 이용할 수 있습니다. 이 커널은 배우기 쉬운 쪽을 택했습니다. 나중에 `syscall` 로 바꿔 보는 것도 좋은 연습 문제입니다.
 
-- 부팅 로그에 `[syscall] int 0x80 gate registered (DPL=3)` 와 `[syscall] rax=66 (unimplemented)`
+## 커널 안에서 시험하기
 
-## 자주 막히는 곳
+```c
+__asm__ volatile("mov $0x42, %%rax\n\tint $0x80" ::: "rax");
+```
 
-| 증상 | 원인 |
-|---|---|
-| `int $0x80` 에서 General Protection | 게이트 DPL이 0 (Step 14에서 ring 3일 때 드러남) |
-| 반환 후 레지스터가 엉망 | 스텁의 push/pop 순서 불일치 |
+`main.c` 는 `rax` 에 `0x42`(66)를 넣고 `int $0x80` 을 실행합니다. 지금은 ring 0에서 부르는 것이라 DPL 검사는 어차피 통과하므로, 이 시험은 "게이트가 등록됐고 스텁과 핸들러가 이어져 있다"는 것만 확인해 줍니다. ring 3에서의 진짜 시험은 Step 14에서 합니다.
+이 시험 코드는 Step 12에서 지워집니다.
+
+## 이 단계가 뒤에 남기는 것
+
+인터럽트 번호 0x80이 시스템 콜 자리로 확정되고, 유저가 커널에 들어올 수 있는 유일한 문이 됩니다.
+`rax` = 번호, `rdi`/`rsi`/`rdx` = 인자, `rax` = 결과라는 호출 규약과 Linux식 번호 체계가 정해집니다. 유저 프로그램 쪽의 시스템 콜 래퍼(Step 18)도 이 약속대로 레지스터를 채웁니다.
+"핸들러가 `r->rax` 를 고치면 그게 반환값"이라는 요령과, `syscall_handler` 의 `switch` 문은 이후 모든 시스템 콜이 붙는 자리입니다.
+
+## 직접 만들어 보기
+
+`idt_set_gate` 를 복사해 타입만 바꾼 `idt_set_user_gate` 를 만들고, `isr128` 스텁을 기존 스텁 모양대로 작성합니다.
+`syscall_handler` 에서는 처음에 `r->rax` 만 출력하세요. `main.c` 에서 `int $0x80` 으로 시험한 뒤, 핸들러에서 `r->rax = 1234` 로 바꾸고 `int` 다음 줄에서 `rax` 를 읽어 출력해 보면 반환값 전달 방식을 눈으로 확인할 수 있습니다.
+같은 시험을 `idt_set_gate`(DPL 0)로 등록해도 동작한다는 것도 확인해 두세요. ring 0에서는 차이가 없다는 것을 알아 두면 Step 14에서 #GP가 났을 때 원인을 빨리 찾을 수 있습니다.
+
+## 확인하기
+
+부팅 로그에 다음 두 줄이 나옵니다.
+
+```
+[syscall] int 0x80 gate registered (DPL=3)
+[syscall] rax=66 (unimplemented)
+```
+
+## 막혔을 때
+
+`int $0x80` 에서 General Protection 패닉이 난다면 0x80번 게이트가 등록되지 않았거나 Present 비트가 꺼진 것입니다. 지금은 ring 0에서 부르므로 DPL 문제는 아닙니다. DPL 문제는 Step 14에서 ring 3일 때 드러납니다.
+시험 뒤에 커널이 이상하게 동작한다면 스텁의 push/pop 순서가 어긋나 레지스터가 바뀐 채 돌아온 것입니다. 기존 `isr_common` 과 줄 단위로 비교해 보세요.
+`rax` 값이 이상하게 출력된다면 `registers_t` 의 필드 순서와 스텁의 push 순서를 다시 맞춰 보세요.
 
 ## 다음 단계로
 
-문은 열었지만, 유저 코드가 놓일 **메모리**도 유저가 접근 가능해야 한다. 페이지 테이블의 U/S 비트를 다룬다 → [Step 12](step12-user-mapping.md)
+문은 열렸지만, 유저 코드가 놓일 **메모리** 도 유저가 접근할 수 있어야 합니다. 지금까지 만든 모든 페이지는 커널 전용이라, ring 3 코드는 자기 코드조차 읽을 수 없습니다.
+다음 단계에서는 페이지 테이블의 U/S 비트를 다뤄 유저용 코드와 스택 페이지를 만듭니다 → [Step 12](step12-user-mapping.md)
