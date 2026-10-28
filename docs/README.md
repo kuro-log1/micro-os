@@ -60,6 +60,7 @@ Part 4. 유닉스 프로세스 — "fork · exec · wait 로 프로그램을 띄
 | # | 태그 / 문서 | 한 줄 요약 |
 |---|---|---|
 | 01-1 | [step01-1-multiboot](step01-1-multiboot.md) | 빌드 체계와 multiboot2 헤더 — GRUB이 커널을 알아보게 |
+| 01-2 | [step01-2-vga32](step01-2-vga32.md) | 32비트에서 화면 메모리에 직접 `OK` 쓰기, GRUB이 준 값 보존 |
 
 ## 미리 알아 두면 좋은 것
 
