@@ -63,6 +63,7 @@ Part 4. 유닉스 프로세스 — "fork · exec · wait 로 프로그램을 띄
 | 01-2 | [step01-2-vga32](step01-2-vga32.md) | 32비트에서 화면 메모리에 직접 `OK` 쓰기, GRUB이 준 값 보존 |
 | 01-3 | [step01-3-longmode](step01-3-longmode.md) | 페이지 테이블 · GDT 로 64비트 롱 모드 진입, 첫 C 함수 |
 | 01-4 | [step01-4-vga-serial](step01-4-vga-serial.md) | VGA · 시리얼 드라이버, 포트 I/O, 최소 문자열 함수 |
+| 01-5 | [step01-boot](step01-boot.md) | 작은 `printf` — Step 01 완성 |
 
 ## 미리 알아 두면 좋은 것
 
