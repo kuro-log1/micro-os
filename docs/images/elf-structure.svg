@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="600" viewBox="0 0 960 600" font-family="'Noto Sans CJK KR', 'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif">
+  <defs>
+    <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2f9e44"/></marker>
+    <marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1971c2"/></marker>
+    <marker id="ao" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#e8590c"/></marker>
+  </defs>
+  <style>
+    .t  { font-size: 15px; fill: #212529; }
+    .s  { font-size: 13px; fill: #495057; }
+    .h  { font-size: 16px; font-weight: 700; fill: #212529; }
+    .m  { font-family: 'JetBrains Mono', 'D2Coding', monospace; font-size: 13px; fill: #343a40; }
+    .ttl{ font-size: 20px; font-weight: 700; fill: #212529; }
+    .col{ font-size: 15px; font-weight: 700; fill: #495057; }
+  </style>
+
+  <rect width="960" height="600" fill="#ffffff"/>
+  <text x="480" y="36" text-anchor="middle" class="ttl">kernel.elf 는 어떻게 생겼고, GRUB은 이걸 어떻게 메모리에 올리나</text>
+
+  <!-- 왼쪽: 파일 -->
+  <text x="265" y="72" text-anchor="middle" class="col">디스크의 파일 (kernel.elf)</text>
+  <text x="96" y="72" text-anchor="end" class="s">파일 위치</text>
+
+  <!-- ELF 헤더 -->
+  <text x="96" y="100" text-anchor="end" class="m">0x0000</text>
+  <rect x="110" y="84" width="310" height="96" rx="6" fill="#e7f5ff" stroke="#1971c2" stroke-width="2"/>
+  <text x="124" y="108" class="h">ELF 헤더</text>
+  <text x="124" y="130" class="s">매직 <tspan class="m">7F 'E' 'L' 'F'</tspan> · 64비트 · x86-64</text>
+  <text x="124" y="150" class="s">진입점 <tspan class="m">e_entry = 0x100018</tspan></text>
+  <text x="124" y="170" class="s">프로그램 헤더 · 섹션 헤더의 위치</text>
+
+  <!-- 프로그램 헤더 -->
+  <text x="96" y="208" text-anchor="end" class="m">0x0040</text>
+  <rect x="110" y="192" width="310" height="86" rx="6" fill="#fff4e6" stroke="#e8590c" stroke-width="2"/>
+  <text x="124" y="216" class="h">프로그램 헤더 <tspan class="s">(세그먼트 표)</tspan></text>
+  <text x="124" y="238" class="s">LOAD: 파일 <tspan class="m">0x1000</tspan> 부터 <tspan class="m">0x50</tspan> 바이트를</text>
+  <text x="124" y="258" class="s">      주소 <tspan class="m">0x100000</tspan> 에 올려라 · 권한 <tspan class="m">R E</tspan></text>
+
+  <!-- 빈 공간 -->
+  <text x="265" y="300" text-anchor="middle" class="s">⋮ (정렬용 빈 공간)</text>
+
+  <!-- .text -->
+  <text x="96" y="330" text-anchor="end" class="m">0x1000</text>
+  <rect x="110" y="314" width="310" height="128" rx="6" fill="#ebfbee" stroke="#2f9e44" stroke-width="2"/>
+  <text x="124" y="337" class="h">.text <tspan class="s">(코드 섹션)</tspan></text>
+  <rect x="124" y="348" width="282" height="36" rx="4" fill="#d3f9d8" stroke="#2f9e44"/>
+  <text x="136" y="371" class="t">multiboot2 헤더 <tspan class="m">E85250D6 …</tspan></text>
+  <rect x="124" y="392" width="282" height="40" rx="4" fill="#d3f9d8" stroke="#2f9e44"/>
+  <text x="136" y="417" class="t">_start: <tspan class="m">cli · hlt · jmp</tspan></text>
+
+  <!-- 섹션 헤더 -->
+  <rect x="110" y="458" width="310" height="62" rx="6" fill="#f1f3f5" stroke="#868e96" stroke-width="2" stroke-dasharray="6 4"/>
+  <text x="124" y="482" class="h">섹션 헤더 <tspan class="s">(섹션 표)</tspan></text>
+  <text x="124" y="505" class="s">링커 · 디버거용 — GRUB은 보지 않는다</text>
+
+  <!-- 오른쪽: 메모리 -->
+  <text x="730" y="72" text-anchor="middle" class="col">메모리 (물리 주소)</text>
+
+  <rect x="580" y="84" width="300" height="112" rx="6" fill="#f1f3f5" stroke="#adb5bd" stroke-width="2"/>
+  <text x="594" y="108" class="m">0x000000 ~ 0x0FFFFF</text>
+  <text x="594" y="134" class="h">1MB 아래</text>
+  <text x="594" y="158" class="s">BIOS 데이터 · VGA 화면 메모리 · ROM</text>
+  <text x="594" y="180" class="s">이미 주인이 정해진 칸들이라 피한다</text>
+
+  <text x="730" y="300" text-anchor="middle" class="s">⋮</text>
+
+  <rect x="580" y="348" width="300" height="36" rx="4" fill="#d3f9d8" stroke="#2f9e44" stroke-width="2"/>
+  <text x="594" y="371" class="t"><tspan class="m">0x100000</tspan>  multiboot2 헤더</text>
+  <rect x="580" y="392" width="300" height="40" rx="4" fill="#d3f9d8" stroke="#2f9e44" stroke-width="2"/>
+  <text x="594" y="417" class="t"><tspan class="m">0x100018</tspan>  _start</text>
+
+  <rect x="580" y="458" width="300" height="62" rx="6" fill="#ffffff" stroke="#ced4da" stroke-width="2" stroke-dasharray="6 4"/>
+  <text x="594" y="482" class="s">그 위: 아직 비어 있는 RAM</text>
+  <text x="594" y="505" class="s">(Step 05 에서 빌려 쓰기 시작)</text>
+
+  <!-- ① 헤더 → 프로그램 헤더 -->
+  <path d="M420,166 C462,172 462,222 424,228" fill="none" stroke="#e8590c" stroke-width="2" marker-end="url(#ao)"/>
+  <circle cx="458" cy="197" r="12" fill="#e8590c"/><text x="458" y="202" text-anchor="middle" font-size="14" font-weight="700" fill="#fff">1</text>
+
+  <!-- ② 복사 -->
+  <path d="M420,366 L576,366" fill="none" stroke="#2f9e44" stroke-width="3" marker-end="url(#ag)"/>
+  <circle cx="498" cy="348" r="12" fill="#2f9e44"/><text x="498" y="353" text-anchor="middle" font-size="14" font-weight="700" fill="#fff">2</text>
+
+  <!-- ③ 점프 -->
+  <path d="M420,112 C560,120 520,410 576,414" fill="none" stroke="#1971c2" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#ab)"/>
+  <circle cx="533" cy="250" r="12" fill="#1971c2"/><text x="533" y="255" text-anchor="middle" font-size="14" font-weight="700" fill="#fff">3</text>
+
+  <!-- 범례 -->
+  <line x1="40" y1="540" x2="920" y2="540" stroke="#dee2e6"/>
+  <circle cx="52" cy="566" r="10" fill="#e8590c"/><text x="52" y="571" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">1</text>
+  <text x="70" y="571" class="s">ELF 헤더에서 프로그램 헤더 위치를 찾는다</text>
+  <circle cx="362" cy="566" r="10" fill="#2f9e44"/><text x="362" y="571" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">2</text>
+  <text x="380" y="571" class="s">LOAD 세그먼트대로 0x100000 에 복사</text>
+  <circle cx="642" cy="566" r="10" fill="#1971c2"/><text x="642" y="571" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">3</text>
+  <text x="660" y="571" class="s">e_entry(0x100018)로 점프 → 우리 코드 시작</text>
+</svg>
