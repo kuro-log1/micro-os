@@ -1,16 +1,24 @@
 #include <stdint.h>
+#include "drivers/vga.h"
+#include "drivers/serial.h"
 
-#define MB2_BOOT_MAGIC 0x36D76289  /* GRUB이 eax로 넘겨 주는 값 */
+/* printf가 생기기 전까지 쓰는 임시 출력: 화면과 시리얼에 같은 글자를 보낸다 */
+static void puts_both(const char *s) {
+    for (; *s; s++) {
+        vga_putchar(*s);
+        serial_putchar(*s);
+    }
+}
 
 void kernel_main(uint64_t magic, uint64_t info) {
+    (void)magic;
     (void)info;
 
-    /* 아직 출력 드라이버가 없다: VGA 텍스트 버퍼 두 번째 줄(80칸 뒤)에 직접 쓴다 */
-    volatile uint16_t *vga = (uint16_t *)0xB8000 + 80;
-    const char *msg = (magic == MB2_BOOT_MAGIC) ? "Hello from 64-bit C! (magic OK)"
-                                                : "Hello from 64-bit C! (bad magic)";
-    for (int i = 0; msg[i]; i++)
-        vga[i] = (0x0F << 8) | msg[i];
+    vga_init();
+    serial_init();
+
+    puts_both("vga + serial ready\n");
+    puts_both("line 2: newline works\n");
 
     for (;;) __asm__ volatile("hlt");
 }

@@ -72,9 +72,6 @@ _start:
     mov $stack_top, %esp
     xor %ebp, %ebp
 
-    /* 확인용: 화면 왼쪽 위에 "OK" (글자 바이트 | 색 바이트 0x2F = 초록 바탕 흰 글자) */
-    movl $0x2F4B2F4F, 0xB8000
-
     /* ---------- 페이지 테이블 설정 ----------
      * PML4[0] → PDPT, PDPT[0] → PD
      * PD: 512개 × 2MB = 1GB 아이덴티티 매핑
